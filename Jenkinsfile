@@ -32,7 +32,8 @@ pipeline {
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
-                sh '''                    . venv/bin/activate
+                sh '''                   
+                    . venv/bin/activate
                     python -m pytest --cov=app --cov-fail-under=80
                 '''
                
@@ -64,8 +65,10 @@ pipeline {
         stage('Run API Requests Test') {
             steps {
                 echo 'Running API requests test...'
-               
-                sh 'python -m pytest tests/test_api.py'
+               sh '''
+                    . venv/bin/activate
+                    python -m pytest tests/test_api.py
+                '''
             }
         }
     }

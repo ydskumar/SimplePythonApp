@@ -20,15 +20,16 @@ pipeline {
         }
 
         stage('Install Dependencies') {
-    steps {
-        sh '''
-            python -m venv venv
-            . venv/bin/activate
-            pip install --upgrade pip
-            pip install -r requirements.txt
-        '''
-    }
-}
+            steps {
+                sh '''
+                    python -m venv venv
+                    . venv/bin/activate
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
+                '''
+            }
+        }
+
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
@@ -46,22 +47,41 @@ pipeline {
                 sh "docker build -t $IMAGE_NAME ."
             }
         }
+
+        stage('Manual Approval') {
+            steps {
+                input message: "Approve deployment to Test?", ok: "Deploy"
+            }
+        }
+
         stage('Deploy to Test (Local Container)') {
             steps {
                 echo 'Deploying to test environment...'
                 sh '''
                     docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
-                    docker run -d -p 5000:5000 --name $CONTAINER_NAME $IMAGE_NAME
+                    docker run -d -p 5000:5000 --name $CONTAINER_NAME $IMAGE_NAME:${BUILD_NUMBER}
                 '''
             }
         }
 
-        stage('Wait for Container') {
-    steps {
-        echo 'Waiting for container to start...'
-        sh 'sleep 5'
-    }
-}
+        stage('Health Check') {
+            steps {
+                sh '''
+                    echo "Waiting for application health..."
+                    for i in {1..20}; do
+                        if curl -s http://localhost:8081/health | grep -q "UP"; then
+                            echo "Application is healthy!"
+                            exit 0
+                        fi
+                        echo "Waiting..."
+                        sleep 2
+                    done
+                    echo "Health check failed!"
+                    exit 1
+                '''
+            }
+        }
+        
         stage('Run API Requests Test') {
             steps {
                 echo 'Running API requests test...'

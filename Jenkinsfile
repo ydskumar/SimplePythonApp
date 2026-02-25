@@ -35,15 +35,15 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 echo 'Building Docker image...'
-                bat "docker build -t ${IMAGE_NAME} ."
+                bat "docker build -t %IMAGE_NAME% ."
             }
         }
         stage('Deploy to Test (Local Container)') {
             steps {
                 echo 'Deploying to test environment...'
                 bat '''
-                    docker rm -f ${CONTAINER_NAME} || true
-                    docker run -d -p 5000:5000 --name ${CONTAINER_NAME} ${IMAGE_NAME}
+                    docker rm -f %CONTAINER_NAME% || true
+                    docker run -d -p 5000:5000 --name %CONTAINER_NAME% %IMAGE_NAME% 
                 '''
             }
         }
@@ -59,7 +59,7 @@ pipeline {
     post {
         always {
             echo 'Cleaning up...'
-            bat 'docker rm -f ${CONTAINER_NAME} || true'
+            bat 'docker rm -f %CONTAINER_NAME% || true'
             bat 'rm -rf *'
         }
         success {

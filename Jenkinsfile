@@ -50,7 +50,7 @@ pipeline {
         stage('Run API Requests Test') {
             steps {
                 echo 'Running API requests test...'
-                bat 'timeout /t 5' // Wait for the container to start
+                bat 'timeout /t 5 /nobreak' // Wait for the container to start
                 bat 'python -m pytest tests/test_api.py'
             }
         }

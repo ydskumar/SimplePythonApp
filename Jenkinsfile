@@ -15,7 +15,7 @@ pipeline {
             steps {
                 echo 'Checking out code...'
                 cleanWs()
-                checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/ydskumar/SimplePythonApp.git']])
+                checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[credentialsId: 'GitHubCred', url: 'https://github.com/ydskumar/SimplePythonApp.git']])
             }
         }
 

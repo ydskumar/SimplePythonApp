@@ -42,15 +42,22 @@ pipeline {
             steps {
                 echo 'Deploying to test environment...'
                 bat '''
-                    docker rm -f %CONTAINER_NAME% || true
+                    docker rm -f %CONTAINER_NAME% >nul 2>&1 || exit /b 0
                     docker run -d -p 5000:5000 --name %CONTAINER_NAME% %IMAGE_NAME% 
                 '''
             }
         }
+
+        stage('Wait for Container') {
+    steps {
+        echo 'Waiting for container to start...'
+        powershell 'Start-Sleep -Seconds 5'
+    }
+}
         stage('Run API Requests Test') {
             steps {
                 echo 'Running API requests test...'
-                bat 'timeout /t 5 /nobreak' // Wait for the container to start
+               
                 bat 'python -m pytest tests/test_api.py'
             }
         }

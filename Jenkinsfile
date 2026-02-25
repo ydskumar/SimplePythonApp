@@ -20,15 +20,22 @@ pipeline {
         }
 
         stage('Install Dependencies') {
-            steps {
-                echo 'Installing dependencies...'
-                sh 'pip install -r requirements.txt'
-            }
-        }
+    steps {
+        sh '''
+            python -m venv venv
+            . venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+        '''
+    }
+}
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
-                sh 'python -m pytest --cov=app --cov-fail-under=80'
+                sh '''                    . venv/bin/activate
+                    python -m pytest --cov=app --cov-fail-under=80
+                '''
+               
             }
         }
 

@@ -15,35 +15,35 @@ pipeline {
             steps {
                 echo 'Checking out code...'
                 cleanWs()
-                checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'file:///C:/Dev/Docker/My-Simple-Python-App']])
+                checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/ydskumar/SimplePythonApp.git']])
             }
         }
 
         stage('Install Dependencies') {
             steps {
                 echo 'Installing dependencies...'
-                bat 'pip install -r requirements.txt'
+                sh 'pip install -r requirements.txt'
             }
         }
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
-                bat 'python -m pytest --cov=app --cov-fail-under=80'
+                sh 'python -m pytest --cov=app --cov-fail-under=80'
             }
         }
 
         stage('Build Docker Image') {
             steps {
                 echo 'Building Docker image...'
-                bat "docker build -t %IMAGE_NAME% ."
+                sh "docker build -t $IMAGE_NAME ."
             }
         }
         stage('Deploy to Test (Local Container)') {
             steps {
                 echo 'Deploying to test environment...'
-                bat '''
-                    docker rm -f %CONTAINER_NAME% >nul 2>&1 || exit /b 0
-                    docker run -d -p 5000:5000 --name %CONTAINER_NAME% %IMAGE_NAME% 
+                sh '''
+                    docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
+                    docker run -d -p 5000:5000 --name $CONTAINER_NAME $IMAGE_NAME
                 '''
             }
         }
@@ -51,14 +51,14 @@ pipeline {
         stage('Wait for Container') {
     steps {
         echo 'Waiting for container to start...'
-        powershell 'Start-Sleep -Seconds 5'
+        sh 'sleep 5'
     }
 }
         stage('Run API Requests Test') {
             steps {
                 echo 'Running API requests test...'
                
-                bat 'python -m pytest tests/test_api.py'
+                sh 'python -m pytest tests/test_api.py'
             }
         }
     }
@@ -66,7 +66,7 @@ pipeline {
     post {
         always {
             echo 'Cleaning up...'
-            bat 'docker rm -f %CONTAINER_NAME% >nul 2>&1 || exit /b 0'
+            sh 'docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0'
             cleanWs()
         }
         success {

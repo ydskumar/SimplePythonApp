@@ -1,9 +1,5 @@
 pipeline {
-    agent {
-        docker {
-            image 'python:3.13'
-        }
-    }
+    agent any
 
     environment {
         IMAGE_NAME = 'my-app'
@@ -25,13 +21,22 @@ pipeline {
 
         stage('Install Dependencies') {
     steps {
-        sh 'pip install -r requirements.txt'
+        sh '''
+            python -m venv venv
+            . venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
+        '''
     }
 }
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
-                sh 'pytest --cov=app --cov-fail-under=80'               
+                sh '''                   
+                    . venv/bin/activate
+                    python -m pytest --cov=app --cov-fail-under=80
+                '''
+               
             }
         }
 
@@ -60,7 +65,10 @@ pipeline {
         stage('Run API Requests Test') {
             steps {
                 echo 'Running API requests test...'
-               sh 'pytest tests/test_api.py'                
+               sh '''
+                    . venv/bin/activate
+                    python -m pytest tests/test_api.py
+                '''
             }
         }
     }

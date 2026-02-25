@@ -60,7 +60,7 @@ pipeline {
         always {
             echo 'Cleaning up...'
             bat 'docker rm -f %CONTAINER_NAME% || true'
-            bat 'rm -rf *'
+            cleanWs()
         }
         success {
             echo 'Pipeline succeeded!'

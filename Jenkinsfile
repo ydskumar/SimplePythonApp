@@ -9,33 +9,13 @@ pipeline {
     options {
         skipDefaultCheckout()
     }
-
+    
     stages {
-
-        stage('Debug Workspace') {
-    steps {
-        bat 'dir'
-    }
-}
-
-stage('Check Agent OS') {
-    steps {
-        bat 'echo %OS%'
-    }
-}
-
         stage('Checkout') {
             steps {
-                echo 'Cleaning workspace...'
-                cleanWs()
-
                 echo 'Checking out code...'
-                checkout scmGit(
-                    branches: [[name: '*/master']],
-                    userRemoteConfigs: [[
-                        url: 'file:///C:/Dev/Docker/My-Simple-Python-App'
-                    ]]
-                )
+                cleanWs()
+                checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'file:///C:/Dev/Docker/My-Simple-Python-App']])
             }
         }
 
@@ -45,7 +25,6 @@ stage('Check Agent OS') {
                 bat 'pip install -r requirements.txt'
             }
         }
-
         stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
@@ -56,26 +35,22 @@ stage('Check Agent OS') {
         stage('Build Docker Image') {
             steps {
                 echo 'Building Docker image...'
-                bat "docker build -t %IMAGE_NAME% ."
+                bat "docker build -t ${IMAGE_NAME} ."
             }
         }
-
         stage('Deploy to Test (Local Container)') {
             steps {
-                echo 'Stopping old container (if exists)...'
-                bat 'docker rm -f %CONTAINER_NAME% >nul 2>&1 || exit /b 0'
-
-                echo 'Starting container...'
-                bat "docker run -d -p 8081:8081 --name %CONTAINER_NAME% %IMAGE_NAME%"
+                echo 'Deploying to test environment...'
+                bat '''
+                    docker rm -f ${CONTAINER_NAME} || true
+                    docker run -d -p 5000:5000 --name ${CONTAINER_NAME} ${IMAGE_NAME}
+                '''
             }
         }
-
         stage('Run API Requests Test') {
             steps {
-                echo 'Waiting for container to start...'
-                bat 'timeout /t 5 /nobreak'
-
-                echo 'Running API tests...'
+                echo 'Running API requests test...'
+                bat 'timeout /t 5' // Wait for the container to start
                 bat 'python -m pytest tests/test_api.py'
             }
         }
@@ -83,17 +58,13 @@ stage('Check Agent OS') {
 
     post {
         always {
-            echo 'Cleaning up container...'
-            bat 'docker rm -f %CONTAINER_NAME% >nul 2>&1 || exit /b 0'
-
-            echo 'Cleaning workspace...'
-            cleanWs()
+            echo 'Cleaning up...'
+            bat 'docker rm -f ${CONTAINER_NAME} || true'
+            bat 'rm -rf *'
         }
-
         success {
             echo 'Pipeline succeeded!'
         }
-
         failure {
             echo 'Pipeline failed.'
         }

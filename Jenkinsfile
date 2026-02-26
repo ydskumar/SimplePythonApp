@@ -109,14 +109,16 @@ pipeline {
                 '''
             }
         }
+
+        stage('Cleanup') {
+            steps {
+                sh "docker rm -f ${CONTAINER_NAME} || true"
+                cleanWs()
+            }
+        }
     }
 
-    post {
-        always {
-            echo 'Cleaning up...'
-            sh 'docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0'
-            cleanWs()
-        }
+    post {        
         success {
             echo 'Pipeline succeeded!'
         }

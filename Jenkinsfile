@@ -106,7 +106,7 @@ pipeline {
                             NETWORK_NAME=$(docker inspect jenkins --format='{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}')             
                             docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
                             docker pull $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
-                            docker run -d --network $NETWORK_NAME -e APP_VERSION=${BUILD_NUMBER} -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}+                   
+                            docker run -d --network $NETWORK_NAME -e APP_VERSION=${BUILD_NUMBER} -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}                   
                         '''
                         } 
                     } catch (err) {
@@ -200,9 +200,37 @@ pipeline {
             }
         }
 
+        stage('Stability Check') {
+            steps {
+                script {
+                    echo "Monitoring stability for 30 seconds..."
+
+                    def stable = sh(
+                        script: '''
+                            for i in {1..15}; do
+                                status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
+                                if [ "$status" != "200" ]; then
+                                    exit 1
+                                fi
+                                sleep 2
+                            done
+                            exit 0
+                        ''',
+                        returnStatus: true
+                    )
+
+                    if (stable != 0) {
+                        error("Application became unstable after deployment!")
+                    }
+
+                    echo "Application stable."
+                }
+            }
+        }
+
         stage('Cleanup') {
             steps {
-                sh "docker rm -f ${CONTAINER_NAME} || true"
+                //sh "docker rm -f ${CONTAINER_NAME} || true"
                 cleanWs()
             }
         }
@@ -210,10 +238,10 @@ pipeline {
 
     post {        
         success {
-            echo 'Pipeline succeeded!'
+        echo "Release ${BUILD_NUMBER} deployed successfully."
         }
         failure {
-            echo 'Pipeline failed.'
+            echo "Release ${BUILD_NUMBER} failed. Check logs."
         }
     }
 }

@@ -1,4 +1,5 @@
 import os
+import time
 
 
 def welcome_message():
@@ -12,3 +13,9 @@ def greetings():
 
 def get_version():
     return os.environ.get("APP_VERSION")
+
+def get_metrics(start_time):
+    return {
+        "status": "healthy",
+        "uptime": time.time() - start_time
+    }

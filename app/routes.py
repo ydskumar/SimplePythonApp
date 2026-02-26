@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify
-from .service import welcome_message, health_status, greetings
+from .service import get_metrics, get_version, welcome_message, health_status, greetings
 
 bp = Blueprint('main', __name__)
 
@@ -17,4 +17,8 @@ def greet():
 
 @bp.route("/version")
 def version():
-    return {"version": os.environ.get("APP_VERSION")}
+    return get_version()
+
+@bp.route("/metrics")
+def metrics():
+    return  get_metrics(start_time=bp.app.config.get('START_TIME', 0))

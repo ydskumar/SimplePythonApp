@@ -44,7 +44,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 echo 'Building Docker image...'
-                sh "docker build -t $IMAGE_NAME ."
+                sh 'docker build -t $IMAGE_NAME:${BUILD_NUMBER} .'
             }
         }
 
@@ -59,7 +59,7 @@ pipeline {
                 echo 'Deploying to test environment...'
                 sh '''
                     docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
-                    docker run -d -p 5000:5000 --name $CONTAINER_NAME $IMAGE_NAME:${BUILD_NUMBER}
+                    docker run -d -p 8081:8081 --name $CONTAINER_NAME $IMAGE_NAME:${BUILD_NUMBER}
                 '''
             }
         }

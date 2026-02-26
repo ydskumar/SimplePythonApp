@@ -86,10 +86,11 @@ pipeline {
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh '''                    
+                    sh '''       
+                    NETWORK_NAME=$(docker inspect jenkins --format='{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}')             
                     docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
                     docker pull $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
-                    docker run -d --network $(docker inspect jenkins --format='{{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}') -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
+                    docker run -d --network $NETWORK_NAME -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
                 '''
                 }                
             }

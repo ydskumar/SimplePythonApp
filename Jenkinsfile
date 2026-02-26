@@ -106,22 +106,47 @@ pipeline {
                             NETWORK_NAME=$(docker inspect jenkins --format='{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}')             
                             docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
                             docker pull $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
-                            docker run -d --network $NETWORK_NAME -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}+21                    
+                            docker run -d --network $NETWORK_NAME -e APP_VERSION=${BUILD_NUMBER} -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}+                   
                         '''
                         } 
                     } catch (err) {
                         echo "Deployment failed. Attempting rollback..."
 
                         if (PREVIOUS_IMAGE != "none") {
+
                             sh """
+                                docker rm -f ${CONTAINER_NAME} || true
                                 docker run -d \
                                 --network jenkins-custom_default \
                                 -p 8081:8081 \
                                 --name ${CONTAINER_NAME} \
                                 ${PREVIOUS_IMAGE}
                             """
+
+                            echo "Validating rollback..."
+
+                            def rollbackStatus = sh(
+                                script: '''
+                                    for i in {1..10}; do
+                                        status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
+                                        if [ "$status" = "200" ]; then
+                                            exit 0
+                                        fi
+                                        sleep 2
+                                    done
+                                    exit 1
+                                ''',
+                                returnStatus: true
+                            )
+
+                            if (rollbackStatus != 0) {
+                                error("Rollback failed! System is unstable!")
+                            }
+
+                            echo "Rollback successful. Previous version restored."
                         }
-                        error("Deployment failed after rollback.")
+
+                        error("Deployment failed. Rolled back successfully.")
                     }
                 }      
                                

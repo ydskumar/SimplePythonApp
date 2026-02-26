@@ -14,3 +14,7 @@ def health():
 @bp.route('/how-are-you')
 def greet():
     return greetings()
+
+@bp.route("/version")
+def version():
+    return {"version": os.environ.get("APP_VERSION")}

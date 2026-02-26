@@ -92,34 +92,36 @@ pipeline {
 
         stage('Deploy to Test (Local Container)') {
             steps {
-                try {
-                    echo 'Deploying to test environment...'
-                    withCredentials([usernamePassword(
-                        credentialsId: 'DockerHubCred',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )]) {
-                        sh '''       
-                        NETWORK_NAME=$(docker inspect jenkins --format='{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}')             
-                        docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
-                        docker pull $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
-                        docker run -d --network $NETWORK_NAME -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}                    
-                    '''
-                    } 
-                } catch (err) {
-                    echo "Deployment failed. Attempting rollback..."
+                script {
+                        try {
+                        echo 'Deploying to test environment...'
+                        withCredentials([usernamePassword(
+                            credentialsId: 'DockerHubCred',
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                        )]) {
+                            sh '''       
+                            NETWORK_NAME=$(docker inspect jenkins --format='{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}')             
+                            docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
+                            docker pull $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
+                            docker run -d --network $NETWORK_NAME -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}                    
+                        '''
+                        } 
+                    } catch (err) {
+                        echo "Deployment failed. Attempting rollback..."
 
-                    if (PREVIOUS_IMAGE != "none") {
-                        sh """
-                            docker run -d \
-                            --network jenkins-custom_default \
-                            -p 8081:8081 \
-                            --name ${CONTAINER_NAME} \
-                            ${PREVIOUS_IMAGE}
-                        """
+                        if (PREVIOUS_IMAGE != "none") {
+                            sh """
+                                docker run -d \
+                                --network jenkins-custom_default \
+                                -p 8081:8081 \
+                                --name ${CONTAINER_NAME} \
+                                ${PREVIOUS_IMAGE}
+                            """
+                        }
+                        error("Deployment failed after rollback.")
                     }
-                    error("Deployment failed after rollback.")
-                }
+                }      
                                
             }
         }

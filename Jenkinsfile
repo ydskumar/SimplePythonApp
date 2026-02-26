@@ -1,39 +1,24 @@
 def PREVIOUS_IMAGE = "none"
-def IMAGE_TAG = ""
 
 pipeline {
     agent any
 
+    environment {
+        IMAGE_NAME = 'my-app'
+        CONTAINER_NAME = 'my-app-container'
+        DOCKERHUB_USER = credentials('DockerHubCred')
+    }
+
     options {
         skipDefaultCheckout()
-        disableConcurrentBuilds()
-        buildDiscarder(logRotator(numToKeepStr: '10'))
-        timestamps()
     }
-
-    environment {
-        IMAGE_NAME      = 'my-app'
-        CONTAINER_NAME  = 'my-app-container'
-        DOCKER_NETWORK  = 'jenkins-custom_default'
-        DOCKER_CRED_ID  = 'DockerHubCred'
-        GIT_CRED_ID     = 'GitHubCred'
-    }
-
+    
     stages {
-
         stage('Checkout') {
             steps {
+                echo 'Checking out code...'
                 cleanWs()
                 checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[credentialsId: 'GitHubCred', url: 'https://github.com/ydskumar/SimplePythonApp.git']])
-            }
-        }
-
-        stage('Prepare Metadata') {
-            steps {
-                script {
-                    IMAGE_TAG = "${BUILD_NUMBER}-${env.GIT_COMMIT.take(7)}"
-                    echo "Image Tag: ${IMAGE_TAG}"
-                }
             }
         }
 
@@ -50,41 +35,46 @@ pipeline {
 
         stage('Run Unit Tests') {
             steps {
-                sh '''
+                echo 'Running unit tests...'
+                sh '''                   
                     . venv/bin/activate
                     python -m pytest --cov=app --cov-fail-under=80
                 '''
+               
             }
         }
 
-        stage('Docker Login') {
+        stage('Build Docker Image') {
             steps {
+                echo 'Building Docker image...'
+                // sh 'docker build -t $IMAGE_NAME:${BUILD_NUMBER} .'
                 withCredentials([usernamePassword(
-                    credentialsId: DOCKER_CRED_ID,
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
+                credentialsId: 'DockerHubCred',
+                usernameVariable: 'DOCKER_USER',
+                passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                
+                sh 'docker build -t ${DOCKER_USER}/my-app:${BUILD_NUMBER} .'                
                 }
             }
         }
 
-        stage('Build & Push Image') {
+        stage('Push Image') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: DOCKER_CRED_ID,
+                    credentialsId: 'DockerHubCred',
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh """
-                        docker build -t $DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG} .
-                        docker push $DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG}
-                    """
+                    sh '''
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        docker push $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
+                    '''
                 }
             }
         }
 
-        stage('Capture Previous Image') {
+        stage('Capture Previous Version') {
             steps {
                 script {
                     PREVIOUS_IMAGE = sh(
@@ -96,66 +86,115 @@ pipeline {
             }
         }
 
-        stage('Approval') {
-            options { timeout(time: 1, unit: 'HOURS') }
+        stage('Manual Approval') {
             steps {
                 input message: "Approve deployment to Test?", ok: "Deploy"
             }
         }
 
-        stage('Deploy') {
+        stage('Deploy to Test (Local Container)') {
             steps {
                 script {
-                    try {
+                        try {
+                        echo 'Deploying to test environment...'
                         withCredentials([usernamePassword(
-                            credentialsId: DOCKER_CRED_ID,
+                            credentialsId: 'DockerHubCred',
                             usernameVariable: 'DOCKER_USER',
                             passwordVariable: 'DOCKER_PASS'
                         )]) {
+                            sh '''       
+                            NETWORK_NAME=$(docker inspect jenkins --format='{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}')             
+                            docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
+                            docker pull $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
+                            docker run -d --network $NETWORK_NAME -e APP_VERSION=${BUILD_NUMBER} -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}                   
+                        '''
+                        } 
+                    } catch (err) {
+                        echo "Deployment failed. Attempting rollback..."
+
+                        if (PREVIOUS_IMAGE != "none") {
 
                             sh """
                                 docker rm -f ${CONTAINER_NAME} || true
-                                docker pull $DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG}
                                 docker run -d \
-                                  --network ${DOCKER_NETWORK} \
-                                  -e APP_VERSION=${IMAGE_TAG} \
-                                  -p 8081:8081 \
-                                  --name ${CONTAINER_NAME} \
-                                  $DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG}
+                                --network jenkins-custom_default \
+                                -p 8081:8081 \
+                                --name ${CONTAINER_NAME} \
+                                ${PREVIOUS_IMAGE}
                             """
+
+                            echo "Validating rollback..."
+
+                            def rollbackStatus = sh(
+                                script: '''
+                                    for i in {1..10}; do
+                                        status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
+                                        if [ "$status" = "200" ]; then
+                                            exit 0
+                                        fi
+                                        sleep 2
+                                    done
+                                    exit 1
+                                ''',
+                                returnStatus: true
+                            )
+
+                            if (rollbackStatus != 0) {
+                                error("Rollback failed! System is unstable!")
+                            }
+
+                            echo "Rollback successful. Previous version restored."
                         }
 
-                    } catch (err) {
-                        rollback()
-                        error("Deployment failed.")
+                        error("Deployment failed. Rolled back successfully.")
                     }
-                }
+                }      
+                               
             }
         }
 
         stage('Health Check') {
             steps {
-                script {
-                    def status = sh(
-                        script: '''
-                            for i in {1..30}; do
-                                status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
-                                if [ "$status" = "200" ]; then exit 0; fi
-                                sleep 2
-                            done
-                            exit 1
-                        ''',
-                        returnStatus: true
-                    )
+                    script {
+                        def status = sh(
+                            script: '''
+                                for i in {1..30}; do
+                                    status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
+                                    if [ "$status" = "200" ]; then
+                                        echo "App ready"
+                                        exit 0
+                                    fi
 
-                    if (status != 0) {
-                        rollback()
-                        error("Health check failed.")
+                                    echo "Not ready yet... ($i)"
+                                    sleep 2
+                                done
+
+                                echo "Health timeout"
+                                exit 1
+                            ''',
+                            returnStatus: true
+                        )
+
+                        if (status != 0) {
+                            echo "Health failed. Rolling back..."
+
+                            if (PREVIOUS_IMAGE != "none") {
+                                sh """
+                                    docker rm -f ${CONTAINER_NAME} || true
+                                    docker run -d \
+                                    --network jenkins-custom_default \
+                                    -p 8081:8081 \
+                                    --name ${CONTAINER_NAME} \
+                                    ${PREVIOUS_IMAGE}
+                                """
+                            }
+
+                            error("Health check failed. Rolled back.")
+                        }
                     }
                 }
-            }
         }
-
+        
         stage('API Tests') {
             steps {
                 script {
@@ -173,37 +212,48 @@ pipeline {
             }
         }
 
+        stage('Stability Check') {
+            steps {
+                script {
+                    echo "Monitoring stability for 30 seconds..."
+
+                    def stable = sh(
+                        script: '''
+                            for i in {1..15}; do
+                                status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
+                                if [ "$status" != "200" ]; then
+                                    exit 1
+                                fi
+                                sleep 2
+                            done
+                            exit 0
+                        ''',
+                        returnStatus: true
+                    )
+
+                    if (stable != 0) {
+                        error("Application became unstable after deployment!")
+                    }
+
+                    echo "Application stable."
+                }
+            }
+        }
+
         stage('Cleanup') {
             steps {
+                //sh "docker rm -f ${CONTAINER_NAME} || true"
                 cleanWs()
-                sh 'docker image prune -f || true'
             }
         }
     }
 
-    post {
+    post {        
         success {
-            echo "Release ${IMAGE_TAG} deployed successfully."
+        echo "Release ${BUILD_NUMBER} deployed successfully."
         }
         failure {
-            echo "Release ${IMAGE_TAG} failed."
+            echo "Release ${BUILD_NUMBER} failed. Check logs."
         }
-    }
-}
-
-def rollback() {
-    if (PREVIOUS_IMAGE != "none") {
-        echo "Rolling back to ${PREVIOUS_IMAGE}"
-
-        sh """
-            docker rm -f my-app-container || true
-            docker run -d \
-              --network jenkins-custom_default \
-              -p 8081:8081 \
-              --name my-app-container \
-              ${PREVIOUS_IMAGE}
-        """
-    } else {
-        echo "No previous image found. Cannot rollback."
     }
 }

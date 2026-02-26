@@ -8,7 +8,7 @@ def welcome_message():
 def health_status():
     if os.environ.get("FAIL_HEALTH") == "true":
         return {"status": "DOWN"}, 500
-    return {"status": "UP"}
+    return {"status": "healthy"}, 200
 
 def greetings():
     return "I'm good, how about you?"

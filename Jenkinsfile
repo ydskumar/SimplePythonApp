@@ -46,7 +46,14 @@ pipeline {
             steps {
                 echo 'Building Docker image...'
                 // sh 'docker build -t $IMAGE_NAME:${BUILD_NUMBER} .'
-                sh 'docker build -t $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER} .'
+                withCredentials([usernamePassword(
+                credentialsId: 'DockerHubCred',
+                usernameVariable: 'DOCKER_USER',
+                passwordVariable: 'DOCKER_PASS'
+                )]) {
+                
+                sh 'docker build -t ${DOCKER_USER}/my-app:${BUILD_NUMBER} .'                
+                }
             }
         }
 
@@ -74,11 +81,17 @@ pipeline {
         stage('Deploy to Test (Local Container)') {
             steps {
                 echo 'Deploying to test environment...'
-                sh '''                    
+                withCredentials([usernamePassword(
+                    credentialsId: 'DockerHubCred',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh '''                    
                     docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
                     docker pull $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
                     docker run -d --network jenkins-custom_default -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
                 '''
+                }                
             }
         }
 

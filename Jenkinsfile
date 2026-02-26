@@ -69,7 +69,7 @@ pipeline {
                 sh '''
                     echo "Waiting for application health..."
                     for i in {1..20}; do
-                        if curl -s http://localhost:8081/health | grep -q "UP"; then
+                        if curl -s http://localhost:8081/health | grep -q "healthy"; then
                             echo "Application is healthy!"
                             exit 0
                         fi

@@ -72,6 +72,18 @@ pipeline {
             }
         }
 
+        stage('Capture Previous Version') {
+            steps {
+                script {
+                    PREVIOUS_IMAGE = sh(
+                        script: "docker inspect --format='{{.Config.Image}}' ${CONTAINER_NAME} 2>/dev/null || echo 'none'",
+                        returnStdout: true
+                    ).trim()
+                    echo "Previous image: ${PREVIOUS_IMAGE}"
+                }
+            }
+        }
+
         stage('Manual Approval') {
             steps {
                 input message: "Approve deployment to Test?", ok: "Deploy"
@@ -80,39 +92,73 @@ pipeline {
 
         stage('Deploy to Test (Local Container)') {
             steps {
-                echo 'Deploying to test environment...'
-                withCredentials([usernamePassword(
-                    credentialsId: 'DockerHubCred',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
-                )]) {
-                    sh '''       
-                    NETWORK_NAME=$(docker inspect jenkins --format='{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}')             
-                    docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
-                    docker pull $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
-                    docker run -d --network $NETWORK_NAME -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
-                    docker logs $CONTAINER_NAME
-                '''
-                }                
+                try{
+                    echo 'Deploying to test environment...'
+                    withCredentials([usernamePassword(
+                        credentialsId: 'DockerHubCred',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )]) {
+                        sh '''       
+                        NETWORK_NAME=$(docker inspect jenkins --format='{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}')             
+                        docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
+                        docker pull $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
+                        docker run -d --network $NETWORK_NAME -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}                    
+                    '''
+                    } 
+                } catch (Exception e) {
+                    echo "Deployment failed. Attempting rollback..."
+
+                    if (PREVIOUS_IMAGE != "none") {
+                        sh """
+                            docker run -d \
+                            --network jenkins-custom_default \
+                            -p 8081:8081 \
+                            --name ${CONTAINER_NAME} \
+                            ${PREVIOUS_IMAGE}
+                        """
+                    }
+                    error("Deployment failed after rollback.")
+                }
+                               
             }
         }
 
         stage('Health Check') {
             steps {
-                sh '''
-                    for i in {1..20}; do
-                        status=$(curl -s -o /dev/null -w "%{http_code}" http://${CONTAINER_NAME}:8081/health)
-                        if [ "$status" = "200" ]; then
-                            echo "Application is healthy!"
-                            exit 0
-                        fi
-                        echo "Waiting..."
-                        sleep 2
-                    done
-                    echo "Health check failed!"
-                    exit 1
-                '''
-            }
+                    script {
+                        def status = sh(
+                            script: '''
+                                for i in {1..10}; do
+                                    status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
+                                    if [ "$status" = "200" ]; then
+                                        exit 0
+                                    fi
+                                    sleep 2
+                                done
+                                exit 1
+                            ''',
+                            returnStatus: true
+                        )
+
+                        if (status != 0) {
+                            echo "Health failed. Rolling back..."
+
+                            if (PREVIOUS_IMAGE != "none") {
+                                sh """
+                                    docker rm -f ${CONTAINER_NAME} || true
+                                    docker run -d \
+                                    --network jenkins-custom_default \
+                                    -p 8081:8081 \
+                                    --name ${CONTAINER_NAME} \
+                                    ${PREVIOUS_IMAGE}
+                                """
+                            }
+
+                            error("Health check failed. Rolled back.")
+                        }
+                    }
+                }
         }
         
         stage('Run API Requests Test') {

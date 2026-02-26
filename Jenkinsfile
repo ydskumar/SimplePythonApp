@@ -91,6 +91,7 @@ pipeline {
                     docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
                     docker pull $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
                     docker run -d --network $NETWORK_NAME -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
+                    docker logs $CONTAINER_NAME
                 '''
                 }                
             }

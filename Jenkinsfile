@@ -67,9 +67,9 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh '''
-                    echo "Waiting for application health..."
                     for i in {1..20}; do
-                        if curl -s http://localhost:8081/health | grep -q "healthy"; then
+                        status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/health)
+                        if [ "$status" = "200" ]; then
                             echo "Application is healthy!"
                             exit 0
                         fi

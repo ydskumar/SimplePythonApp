@@ -92,7 +92,7 @@ pipeline {
 
         stage('Deploy to Test (Local Container)') {
             steps {
-                try{
+                try {
                     echo 'Deploying to test environment...'
                     withCredentials([usernamePassword(
                         credentialsId: 'DockerHubCred',
@@ -106,7 +106,7 @@ pipeline {
                         docker run -d --network $NETWORK_NAME -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}                    
                     '''
                     } 
-                } catch (Exception e) {
+                } catch (err) {
                     echo "Deployment failed. Attempting rollback..."
 
                     if (PREVIOUS_IMAGE != "none") {

@@ -64,18 +64,11 @@ pipeline {
             }
         }
 
-        stage('Debug Container') {
-            steps {
-                sh 'docker ps'
-                sh 'docker logs ${CONTAINER_NAME} || true'
-            }
-        }
-
         stage('Health Check') {
             steps {
                 sh '''
                     for i in {1..20}; do
-                        status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/health)
+                        status=$(curl -s -o /dev/null -w "%{http_code}" http://${CONTAINER_NAME}:8081/health)
                         if [ "$status" = "200" ]; then
                             echo "Application is healthy!"
                             exit 0

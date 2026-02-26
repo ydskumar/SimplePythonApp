@@ -8,5 +8,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 EXPOSE 8081
+ENV PORT=8081
 
 CMD [ "python", "run.py" ]

@@ -1,3 +1,5 @@
+def PREVIOUS_IMAGE = "none"
+
 pipeline {
     agent any
 

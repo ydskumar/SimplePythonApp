@@ -46,7 +46,7 @@ pipeline {
             steps {
                 echo 'Building Docker image...'
                 // sh 'docker build -t $IMAGE_NAME:${BUILD_NUMBER} .'
-                sh 'docker build -t $DOCKERHUB_USER/$IMAGE_NAME:${BUILD_NUMBER} .'
+                sh 'docker build -t $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER} .'
             }
         }
 
@@ -76,8 +76,8 @@ pipeline {
                 echo 'Deploying to test environment...'
                 sh '''                    
                     docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
-                    docker pull $DOCKERHUB_USER/$IMAGE_NAME:${BUILD_NUMBER}
-                    docker run -d --network jenkins-custom_default -p 8081:8081 --name $CONTAINER_NAME $DOCKERHUB_USER/$IMAGE_NAME:${BUILD_NUMBER}
+                    docker pull $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
+                    docker run -d --network jenkins-custom_default -p 8081:8081 --name $CONTAINER_NAME $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
                 '''
             }
         }

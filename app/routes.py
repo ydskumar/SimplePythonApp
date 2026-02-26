@@ -17,10 +17,10 @@ def greet():
 
 @bp.route("/version")
 def version():
-    return get_version()
+   return jsonify({"version": get_version() or "unknown"})
 
 @bp.route("/metrics")
 def metrics():    
-    return get_metrics(
+    return jsonify(get_metrics(
         start_time=bp.config.get('START_TIME', 0)
-    )
+    ))

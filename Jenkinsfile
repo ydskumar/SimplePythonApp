@@ -60,7 +60,7 @@ pipeline {
                 sh '''
                     docker network ls
                     docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
-                    docker run -d --network jenkins-docker_default -p 8081:8081 --name $CONTAINER_NAME $IMAGE_NAME:${BUILD_NUMBER}
+                    docker run -d --network jenkins-custom_default -p 8081:8081 --name $CONTAINER_NAME $IMAGE_NAME:${BUILD_NUMBER}
                 '''
             }
         }

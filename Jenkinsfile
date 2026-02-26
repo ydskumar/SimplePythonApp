@@ -24,7 +24,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 cleanWs()
-                checkout scm
+                checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[credentialsId: 'GitHubCred', url: 'https://github.com/ydskumar/SimplePythonApp.git']])
             }
         }
 
@@ -158,10 +158,18 @@ pipeline {
 
         stage('API Tests') {
             steps {
-                sh '''
-                    . venv/bin/activate
-                    python -m pytest tests/test_api.py
-                '''
+                script {
+                    try {
+                        sh '''
+                            . venv/bin/activate
+                            python -m pytest tests/test_api.py
+                        '''
+                    } catch (err) {
+                        echo "API tests failed. Initiating rollback..."
+                        rollback()
+                        error("API tests failed after deployment. Rolled back.")
+                    }
+                }
             }
         }
 

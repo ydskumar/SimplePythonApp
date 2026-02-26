@@ -158,13 +158,18 @@ pipeline {
                     script {
                         def status = sh(
                             script: '''
-                                for i in {1..10}; do
+                                for i in {1..30}; do
                                     status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
                                     if [ "$status" = "200" ]; then
+                                        echo "App ready"
                                         exit 0
                                     fi
+
+                                    echo "Not ready yet... ($i)"
                                     sleep 2
                                 done
+
+                                echo "Health timeout"
                                 exit 1
                             ''',
                             returnStatus: true

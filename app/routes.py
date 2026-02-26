@@ -20,5 +20,7 @@ def version():
     return get_version()
 
 @bp.route("/metrics")
-def metrics():
-    return  get_metrics(start_time=bp.app.config.get('START_TIME', 0))
+def metrics():    
+    return get_metrics(
+        start_time=bp.config.get('START_TIME', 0)
+    )

@@ -64,6 +64,13 @@ pipeline {
             }
         }
 
+        stage('Debug Container') {
+            steps {
+                sh 'docker ps'
+                sh 'docker logs ${CONTAINER_NAME} || true'
+            }
+        }
+
         stage('Health Check') {
             steps {
                 sh '''

@@ -4,6 +4,7 @@ pipeline {
     environment {
         IMAGE_NAME = 'my-app'
         CONTAINER_NAME = 'my-app-container'
+        DOCKERHUB_USER = credentials('dockerhub-username')
     }
 
     options {
@@ -44,7 +45,23 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 echo 'Building Docker image...'
-                sh 'docker build -t $IMAGE_NAME:${BUILD_NUMBER} .'
+                // sh 'docker build -t $IMAGE_NAME:${BUILD_NUMBER} .'
+                sh 'docker build -t $DOCKERHUB_USER/$IMAGE_NAME:${BUILD_NUMBER} .'
+            }
+        }
+
+        stage('Push Image') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'DockerHubCred',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh '''
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        docker push $DOCKER_USER/$IMAGE_NAME:${BUILD_NUMBER}
+                    '''
+                }
             }
         }
 
@@ -57,10 +74,10 @@ pipeline {
         stage('Deploy to Test (Local Container)') {
             steps {
                 echo 'Deploying to test environment...'
-                sh '''
-                    docker network ls
+                sh '''                    
                     docker rm -f $CONTAINER_NAME > /dev/null 2>&1 || exit 0
-                    docker run -d --network jenkins-custom_default -p 8081:8081 --name $CONTAINER_NAME $IMAGE_NAME:${BUILD_NUMBER}
+                    docker pull $DOCKERHUB_USER/$IMAGE_NAME:${BUILD_NUMBER}
+                    docker run -d --network jenkins-custom_default -p 8081:8081 --name $CONTAINER_NAME $DOCKERHUB_USER/$IMAGE_NAME:${BUILD_NUMBER}
                 '''
             }
         }

@@ -4,7 +4,7 @@ pipeline {
     environment {
         IMAGE_NAME = 'my-app'
         CONTAINER_NAME = 'my-app-container'
-        DOCKERHUB_USER = credentials('DockerHubCred-Username')
+        DOCKERHUB_USER = credentials('DockerHubCred')
     }
 
     options {

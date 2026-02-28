@@ -1,0 +1,209 @@
+def PREVIOUS_IMAGE = "none"
+def IMAGE_TAG = ""
+
+pipeline {
+    agent any
+
+    options {
+        skipDefaultCheckout()
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timestamps()
+    }
+
+    environment {
+        IMAGE_NAME      = 'my-app'
+        CONTAINER_NAME  = 'my-app-container'
+        DOCKER_NETWORK  = 'jenkins-custom_default'
+        DOCKER_CRED_ID  = 'DockerHubCred'
+        GIT_CRED_ID     = 'GitHubCred'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                cleanWs()
+                checkout scm
+            }
+        }
+
+        stage('Prepare Metadata') {
+            steps {
+                script {
+                    IMAGE_TAG = "${BUILD_NUMBER}-${env.GIT_COMMIT.take(7)}"
+                    echo "Image Tag: ${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh '''
+                    python -m venv venv
+                    . venv/bin/activate
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Run Unit Tests') {
+            steps {
+                sh '''
+                    . venv/bin/activate
+                    python -m pytest --cov=app --cov-fail-under=80
+                '''
+            }
+        }
+
+        stage('Docker Login') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: DOCKER_CRED_ID,
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+                }
+            }
+        }
+
+        stage('Build & Push Image') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: DOCKER_CRED_ID,
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh """
+                        docker build -t $DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG} .
+                        docker push $DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG}
+                    """
+                }
+            }
+        }
+
+        stage('Capture Previous Image') {
+            steps {
+                script {
+                    PREVIOUS_IMAGE = sh(
+                        script: "docker inspect --format='{{.Config.Image}}' ${CONTAINER_NAME} 2>/dev/null || echo 'none'",
+                        returnStdout: true
+                    ).trim()
+                    echo "Previous image: ${PREVIOUS_IMAGE}"
+                }
+            }
+        }
+
+        stage('Approval') {
+            options { timeout(time: 1, unit: 'HOURS') }
+            steps {
+                input message: "Approve deployment to Test?", ok: "Deploy"
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                script {
+                    try {
+                        withCredentials([usernamePassword(
+                            credentialsId: DOCKER_CRED_ID,
+                            usernameVariable: 'DOCKER_USER',
+                            passwordVariable: 'DOCKER_PASS'
+                        )]) {
+
+                            sh """
+                                docker rm -f ${CONTAINER_NAME} || true
+                                docker pull $DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG}
+                                docker run -d \
+                                  --network ${DOCKER_NETWORK} \
+                                  -e APP_VERSION=${IMAGE_TAG} \
+                                  -p 8081:8081 \
+                                  --name ${CONTAINER_NAME} \
+                                  $DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG}
+                            """
+                        }
+
+                    } catch (err) {
+                        rollback()
+                        error("Deployment failed.")
+                    }
+                }
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                script {
+                    def status = sh(
+                        script: '''
+                            for i in {1..30}; do
+                                status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
+                                if [ "$status" = "200" ]; then exit 0; fi
+                                sleep 2
+                            done
+                            exit 1
+                        ''',
+                        returnStatus: true
+                    )
+
+                    if (status != 0) {
+                        rollback()
+                        error("Health check failed.")
+                    }
+                }
+            }
+        }
+
+        stage('API Tests') {
+    steps {
+        script {
+            try {
+                sh '''
+                    . venv/bin/activate
+                    python -m pytest tests/test_api.py
+                '''
+            } catch (err) {
+                echo "API tests failed. Initiating rollback..."
+                rollback()
+                error("API tests failed after deployment. Rolled back.")
+            }
+        }
+    }
+}
+
+        stage('Cleanup') {
+            steps {
+                cleanWs()
+                sh 'docker image prune -f || true'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Release ${IMAGE_TAG} deployed successfully."
+        }
+        failure {
+            echo "Release ${IMAGE_TAG} failed."
+        }
+    }
+}
+
+def rollback() {
+    if (PREVIOUS_IMAGE != "none") {
+        echo "Rolling back to ${PREVIOUS_IMAGE}"
+
+        sh """
+            docker rm -f my-app-container || true
+            docker run -d \
+              --network jenkins-custom_default \
+              -p 8081:8081 \
+              --name my-app-container \
+              ${PREVIOUS_IMAGE}
+        """
+    } else {
+        echo "No previous image found. Cannot rollback."
+    }
+}

@@ -243,7 +243,7 @@ pipeline {
 
         stage('Cleanup') {
             steps {
-                //sh "docker rm -f ${CONTAINER_NAME} || true"
+                sh "docker rm -f ${CONTAINER_NAME} || true"
                 cleanWs()
             }
         }

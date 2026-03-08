@@ -138,6 +138,7 @@ pipeline {
                 script {
                     def status = sh(
                         script: '''
+                            sleep 5  # Initial wait for the container to start
                             for i in {1..30}; do
                                 status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
                                 if [ "$status" = "200" ]; then exit 0; fi
@@ -157,21 +158,21 @@ pipeline {
         }
 
         stage('API Tests') {
-    steps {
-        script {
-            try {
-                sh '''
-                    . venv/bin/activate
-                    python -m pytest tests/test_api.py
-                '''
-            } catch (err) {
-                echo "API tests failed. Initiating rollback..."
-                rollback()
-                error("API tests failed after deployment. Rolled back.")
+            steps {
+                script {
+                    try {
+                        sh '''
+                            . venv/bin/activate
+                            python -m pytest tests/test_api.py
+                        '''
+                    } catch (err) {
+                        echo "API tests failed. Initiating rollback..."
+                        rollback()
+                        error("API tests failed after deployment. Rolled back.")
+                    }
+                }
             }
         }
-    }
-}
 
         stage('Cleanup') {
             steps {

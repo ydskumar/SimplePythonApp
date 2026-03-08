@@ -122,13 +122,13 @@ pipeline {
 
                             sh """
                                 docker rm -f ${CONTAINER_NAME} || true
-                                docker pull $DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG}
+                                docker pull $DOCKER_USER/$IMAGE_NAME:${env.IMAGE_TAG}
                                 docker run -d \
                                   --network ${DOCKER_NETWORK} \
-                                  -e APP_VERSION=${IMAGE_TAG} \
+                                  -e APP_VERSION=${env.IMAGE_TAG} \
                                   -p 8081:8081 \
                                   --name ${CONTAINER_NAME} \
-                                  $DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG}
+                                  $DOCKER_USER/$IMAGE_NAME:${env.IMAGE_TAG}
                             """
                         }
 
@@ -191,10 +191,10 @@ pipeline {
 
     post {
         success {
-            echo "Release ${IMAGE_TAG} deployed successfully."
+            echo "Release ${env.IMAGE_TAG} deployed successfully."
         }
         failure {
-            echo "Release ${IMAGE_TAG} failed."
+            echo "Release ${env.IMAGE_TAG} failed."
         }
     }
 }

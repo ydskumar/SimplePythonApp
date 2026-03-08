@@ -31,8 +31,15 @@ pipeline {
         stage('Prepare Metadata') {
             steps {
                 script {
-                    IMAGE_TAG = "${BUILD_NUMBER}-${env.GIT_COMMIT.take(7)}"
-                    echo "Image Tag: ${IMAGE_TAG}"
+
+                    def commit = sh(
+                        script: "git rev-parse --short HEAD",
+                        returnStdout: true
+                    ).trim()
+
+                    env.IMAGE_TAG = "${env.BUILD_NUMBER}-${commit}"
+
+                    echo "Image Tag: ${env.IMAGE_TAG}"
                 }
             }
         }

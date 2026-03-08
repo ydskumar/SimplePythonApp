@@ -128,7 +128,7 @@ pipeline {
                             def rollbackStatus = sh(
                                 script: '''
                                     for i in {1..10}; do
-                                        status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/health)
+                                        status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
                                         if [ "$status" = "200" ]; then
                                             exit 0
                                         fi
@@ -158,8 +158,9 @@ pipeline {
                     script {
                         def status = sh(
                             script: '''
+                                sleep 5  # Initial wait for the container to start
                                 for i in {1..30}; do
-                                    status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/health)
+                                    status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
                                     if [ "$status" = "200" ]; then
                                         echo "App ready"
                                         exit 0
@@ -220,7 +221,7 @@ pipeline {
                     def stable = sh(
                         script: '''
                             for i in {1..15}; do
-                                status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/health)
+                                status=$(curl -s -o /dev/null -w "%{http_code}" http://my-app-container:8081/health)
                                 if [ "$status" != "200" ]; then
                                     exit 1
                                 fi

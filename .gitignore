@@ -1,1 +1,3 @@
 .coverage
+app/__pycache__/
+.pytest_cache/

@@ -1,4 +1,4 @@
-@Library('ci-shared-library@v2.7') _
+@Library('ci-shared-library@v2.8') _
 
 ciPipeline(
         appName: 'my-app',

@@ -184,7 +184,10 @@ pipeline {
         stage('Cleanup') {
             steps {
                 cleanWs()
-                sh 'docker image prune -f || true'
+                sh '''
+                    docker rm -f ${CONTAINER_NAME} || true
+                    docker image prune -f || true
+                '''
             }
         }
     }

@@ -137,11 +137,11 @@ pipeline {
                     env.PREVIOUS_IMAGE = PREVIOUS_IMAGE
 
                     def network = sh(
-                        script: """
-                            docker inspect '${env.JENKINS_CONTAINER_NAME}' --format='{{range \$k,\$v := .NetworkSettings.Networks}}{{println \$k}}{{end}}' 2>/dev/null \
-                              | head -n1 \
-                              || true
-                        """,
+                        script: '''
+                            docker inspect "$JENKINS_CONTAINER_NAME" --format='{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' 2>/dev/null \
+                            | head -n1 \
+                            || true
+                        ''',
                         returnStdout: true
                     ).trim()
 

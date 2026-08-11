@@ -47,7 +47,6 @@ pipeline {
         // Docker / deploy
         IMAGE_NAME             = 'mysimplepython-app'
         CONTAINER_NAME         = 'mysimplepython-app-container'
-        DOCKER_NETWORK         = ''
         JENKINS_CONTAINER_NAME = 'jenkins'
         HOST_PORT              = '8081'
         APP_PORT               = '8081'

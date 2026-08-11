@@ -47,7 +47,7 @@ pipeline {
         // Docker / deploy
         IMAGE_NAME             = 'mysimplepython-app'
         CONTAINER_NAME         = 'mysimplepython-app-container'
-        DOCKER_NETWORK         = 'jenkins-custom_default'
+        DOCKER_NETWORK         = ''
         JENKINS_CONTAINER_NAME = 'jenkins'
         HOST_PORT              = '8081'
         APP_PORT               = '8081'
@@ -145,9 +145,11 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
-                    if (network) {
-                        env.DOCKER_NETWORK = network
+                    if (!network) {
+                        error("Unable to detect Docker network for ${env.JENKINS_CONTAINER_NAME}.")
                     }
+
+                    env.DOCKER_NETWORK = network
 
                     echo "Previous image: ${PREVIOUS_IMAGE}"
                     echo "Docker network: ${env.DOCKER_NETWORK}"

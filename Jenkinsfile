@@ -328,7 +328,7 @@ pipeline {
 def rollback(Map args = [:]) {
     boolean validate = args.get('validate', true)
     def previous = env.PREVIOUS_IMAGE ?: PREVIOUS_IMAGE
-    def network = env.DOCKER_NETWORK ?: 'jenkins-custom_default'
+    def network = env.DOCKER_NETWORK
     def container = env.CONTAINER_NAME ?: 'my-app-container'
     def hostPort = env.HOST_PORT ?: '8081'
     def appPort = env.APP_PORT ?: '8081'
@@ -337,6 +337,10 @@ def rollback(Map args = [:]) {
     if (!previous || previous == 'none') {
         echo 'No previous image found. Cannot rollback.'
         return false
+    }
+
+    if (!network) {
+        error('Unable to rollback because Docker network was not detected.')
     }
 
     echo "Rolling back to ${previous} on network ${network}"

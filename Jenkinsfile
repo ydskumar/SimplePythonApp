@@ -19,6 +19,11 @@ pipeline {
             defaultValue: 'GitHubCred',
             description: 'Jenkins credentials ID for Git checkout'
         )
+        string(
+            name: 'DOCKER_CRED_ID',
+            defaultValue: 'DockerHubCred',
+            description: 'Jenkins credentials ID for Docker Hub login'
+        )
         booleanParam(
             name: 'SKIP_APPROVAL',
             defaultValue: false,
@@ -42,7 +47,6 @@ pipeline {
         // Docker / deploy
         IMAGE_NAME             = 'mysimplepython-app'
         CONTAINER_NAME         = 'mysimplepython-app-container'
-        DOCKER_CRED_ID         = 'DockerHubCred'
         DOCKER_NETWORK         = 'jenkins-custom_default'
         JENKINS_CONTAINER_NAME = 'jenkins'
         HOST_PORT              = '8081'
@@ -98,7 +102,7 @@ pipeline {
         stage('Docker Login') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: env.DOCKER_CRED_ID,
+                    credentialsId: params.DOCKER_CRED_ID,
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
@@ -111,7 +115,7 @@ pipeline {
             steps {
                 echo "Building and pushing ${IMAGE_NAME}:${IMAGE_TAG}..."
                 withCredentials([usernamePassword(
-                    credentialsId: env.DOCKER_CRED_ID,
+                    credentialsId: params.DOCKER_CRED_ID,
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
@@ -170,7 +174,7 @@ pipeline {
                     try {
                         echo 'Deploying to test environment...'
                         withCredentials([usernamePassword(
-                            credentialsId: env.DOCKER_CRED_ID,
+                            credentialsId: params.DOCKER_CRED_ID,
                             usernameVariable: 'DOCKER_USER',
                             passwordVariable: 'DOCKER_PASS'
                         )]) {

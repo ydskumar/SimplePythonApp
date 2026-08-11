@@ -160,11 +160,12 @@ pipeline {
             when {
                 expression { return !params.SKIP_APPROVAL }
             }
-            options {
-                timeout(time: env.APPROVAL_TIMEOUT_HOURS as Integer, unit: 'HOURS')
-            }
             steps {
-                input message: "Approve deployment of ${env.IMAGE_NAME}:${env.IMAGE_TAG} to Test?", ok: 'Deploy'
+                script {
+                    timeout(time: env.APPROVAL_TIMEOUT_HOURS.toInteger(), unit: 'HOURS') {
+                        input message: "Approve deployment of ${env.IMAGE_NAME}:${env.IMAGE_TAG} to Test?", ok: 'Deploy'
+                    }
+                }
             }
         }
 

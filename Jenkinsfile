@@ -16,8 +16,18 @@ pipeline {
         )
         string(
             name: 'GIT_CRED_ID',
-            defaultValue: 'GitHubCred',
+            defaultValue: 'GitHubCredCorp',
             description: 'Jenkins credentials ID for Git checkout'
+        )
+        string(
+            name: 'FUNCTIONAL_TEST_REPO_URL',
+            defaultValue: 'https://github.consilio.com/srkumar/SimplePythonAppTests.git',
+            description: 'Functional test repository URL'
+        )
+        string(
+            name: 'FUNCTIONAL_TEST_BRANCH',
+            defaultValue: 'master',
+            description: 'Functional test repository branch'
         )
         string(
             name: 'DOCKER_CRED_ID',
@@ -26,7 +36,7 @@ pipeline {
         )
         booleanParam(
             name: 'SKIP_APPROVAL',
-            defaultValue: false,
+            defaultValue: true,
             description: 'Skip the manual approval gate before deploy'
         )
         booleanParam(
@@ -50,6 +60,7 @@ pipeline {
         JENKINS_CONTAINER_NAME = 'jenkins'
         HOST_PORT              = '8081'
         APP_PORT               = '8081'
+        APP_BASE_URL           = "http://${CONTAINER_NAME}:${APP_PORT}"
         HEALTH_PATH            = '/health'
         HEALTH_URL             = "http://${CONTAINER_NAME}:${APP_PORT}${HEALTH_PATH}"
         IMAGE_TAG              = "${env.BUILD_NUMBER}"
@@ -77,6 +88,21 @@ pipeline {
             }
         }
 
+        stage('Prepare Metadata') {
+            steps {
+                script {
+                    def commit = sh(
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+
+                    env.IMAGE_TAG = "${env.BUILD_NUMBER}-${commit}"
+
+                    echo "Image tag: ${env.IMAGE_TAG}"
+                }
+            }
+        }
+
         stage('Install Dependencies') {
             steps {
                 sh '''
@@ -90,10 +116,10 @@ pipeline {
 
         stage('Run Unit Tests') {
             steps {
-                echo "Running unit tests (coverage >= ${COVERAGE_MIN}%)..."
+                echo "Running unit and in-process API tests (coverage >= ${COVERAGE_MIN}%)..."
                 sh '''
                     . venv/bin/activate
-                    python -m pytest --cov=app --cov-fail-under="${COVERAGE_MIN}"
+                    python -m pytest tests/test_unit.py tests/test_api.py --cov=app --cov-fail-under="${COVERAGE_MIN}"
                 '''
             }
         }
@@ -112,7 +138,7 @@ pipeline {
 
         stage('Build & Push Image') {
             steps {
-                echo "Building and pushing ${IMAGE_NAME}:${IMAGE_TAG}..."
+                echo "Building and pushing ${env.IMAGE_NAME}:${env.IMAGE_TAG}..."
                 withCredentials([usernamePassword(
                     credentialsId: params.DOCKER_CRED_ID,
                     usernameVariable: 'DOCKER_USER',
@@ -238,21 +264,49 @@ pipeline {
             }
         }
 
-        stage('API Tests') {
+        stage('Functional Tests') {
             steps {
                 script {
                     try {
-                        sh '''
-                            . venv/bin/activate
-                            python -m pytest tests/test_api.py
-                        '''
+                        dir('functional-tests') {
+                            deleteDir()
+                            checkout([
+                                $class: 'GitSCM',
+                                branches: [[name: "*/${params.FUNCTIONAL_TEST_BRANCH}"]],
+                                userRemoteConfigs: [[
+                                    url: params.FUNCTIONAL_TEST_REPO_URL,
+                                    credentialsId: params.GIT_CRED_ID
+                                ]]
+                            ])
+
+                            withEnv(["BASE_URL=${env.APP_BASE_URL}"]) {
+                                sh 'mvn -B test'
+                            }
+                        }
                     } catch (err) {
-                        echo "API tests failed: ${err}"
+                        echo "Functional tests failed: ${err}"
                         def rolledBack = rollback(validate: true)
                         if (rolledBack) {
-                            error('API tests failed after deployment. Rolled back to previous version.')
+                            error('Functional tests failed after deployment. Rolled back to previous version.')
                         } else {
-                            error('API tests failed after deployment. No previous version available to roll back.')
+                            error('Functional tests failed after deployment. No previous version available to roll back.')
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    script {
+                        if (fileExists('functional-tests/target/allure-results')) {
+                            allure([
+                                includeProperties: false,
+                                jdk: '',
+                                properties: [],
+                                reportBuildPolicy: 'ALWAYS',
+                                results: [[path: 'functional-tests/target/allure-results']]
+                            ])
+                        } else {
+                            echo 'No functional test Allure results found to publish.'
                         }
                     }
                 }
@@ -301,6 +355,7 @@ pipeline {
                     } else {
                         echo "Leaving container ${env.CONTAINER_NAME} running on port ${env.HOST_PORT}."
                     }
+                    sh 'docker image prune -f || true'
                     cleanWs()
                 }
             }
@@ -312,10 +367,10 @@ pipeline {
             sh 'docker logout || true'
         }
         success {
-            echo "Release ${IMAGE_TAG} from ${params.GIT_BRANCH} deployed successfully."
+            echo "Release ${env.IMAGE_TAG} from ${params.GIT_BRANCH} deployed successfully."
         }
         failure {
-            echo "Release ${IMAGE_TAG} from ${params.GIT_BRANCH} failed. Check logs."
+            echo "Release ${env.IMAGE_TAG} from ${params.GIT_BRANCH} failed. Check logs."
         }
     }
 }

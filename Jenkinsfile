@@ -64,6 +64,11 @@ pipeline {
             defaultValue: '',
             description: 'Existing immutable image tag to promote to the selected environment. Leave blank to build a new image.'
         )
+        string(
+            name: 'DEPLOY_IMAGE_TAG',
+            defaultValue: '',
+            description: 'Optional alias for PROMOTE_IMAGE_TAG. Use the exact existing Docker image tag to deploy.'
+        )
         booleanParam(
             name: 'ENFORCE_DEPENDENCY_SCAN',
             defaultValue: true,
@@ -141,13 +146,14 @@ pipeline {
                         returnStdout: true
                     ).trim()
                     def safeBranch = sanitizeTag(params.GIT_BRANCH)
+                    def promoteTag = getPromoteImageTag()
 
                     env.GIT_COMMIT_SHORT = shortCommit
                     env.GIT_COMMIT_FULL = fullCommit
                     env.BUILD_DATE_UTC = buildDate
                     env.MOVING_IMAGE_TAG = "${safeBranch}-latest"
-                    env.BUILD_IMAGE = params.PROMOTE_IMAGE_TAG?.trim() ? 'false' : 'true'
-                    env.IMAGE_TAG = params.PROMOTE_IMAGE_TAG?.trim() ?: "${env.BUILD_NUMBER}-${shortCommit}"
+                    env.BUILD_IMAGE = promoteTag ? 'false' : 'true'
+                    env.IMAGE_TAG = promoteTag ?: "${env.BUILD_NUMBER}-${shortCommit}"
                     env.IMAGE_PUSH_ENABLED = isTrustedBranch(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) ? 'true' : 'false'
                     env.DEPLOY_ENABLED = shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) ? 'true' : 'false'
 
@@ -157,6 +163,7 @@ pipeline {
 
                     echo "Image tag: ${env.IMAGE_TAG}"
                     echo "Moving tag: ${env.MOVING_IMAGE_TAG}"
+                    echo "Promote image tag: ${promoteTag ?: '(not supplied)'}"
                     echo "Build image: ${env.BUILD_IMAGE}"
                     echo "Image push enabled: ${env.IMAGE_PUSH_ENABLED}"
                     echo "Deploy enabled: ${env.DEPLOY_ENABLED}"
@@ -172,8 +179,8 @@ pipeline {
                         error("Unsupported deployment runtime: ${params.DEPLOY_RUNTIME}")
                     }
 
-                    if (shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) && ['stage', 'prod'].contains(params.DEPLOY_ENV) && env.BUILD_IMAGE == 'true') {
-                        error("${params.DEPLOY_ENV} deployments must promote an existing immutable image tag using PROMOTE_IMAGE_TAG.")
+                    if (shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) && ['stage', 'prod'].contains(params.DEPLOY_ENV) && !getPromoteImageTag()) {
+                        error("${params.DEPLOY_ENV} deployments must promote an existing immutable image tag using PROMOTE_IMAGE_TAG or DEPLOY_IMAGE_TAG.")
                     }
                 }
             }
@@ -678,6 +685,10 @@ def configureDeploymentEnvironment() {
 
 def shouldDeploy(String branch, String trustedPatterns) {
     return isTrustedBranch(branch, trustedPatterns)
+}
+
+def getPromoteImageTag() {
+    return params.PROMOTE_IMAGE_TAG?.trim() ?: params.DEPLOY_IMAGE_TAG?.trim()
 }
 
 def isTrustedBranch(String branch, String trustedPatterns) {

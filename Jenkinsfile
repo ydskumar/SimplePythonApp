@@ -36,13 +36,43 @@ pipeline {
         )
         booleanParam(
             name: 'SKIP_APPROVAL',
-            defaultValue: true,
-            description: 'Skip the manual approval gate before deploy'
+            defaultValue: false,
+            description: 'Skip the manual approval gate for dev/test only. Stage and prod always require approval.'
         )
         booleanParam(
             name: 'LEAVE_CONTAINER_RUNNING',
             defaultValue: true,
             description: 'Leave the test container running after a successful deploy'
+        )
+        choice(
+            name: 'DEPLOY_ENV',
+            choices: ['dev', 'test', 'stage', 'prod'],
+            description: 'Target environment for local Docker promotion/deployment'
+        )
+        choice(
+            name: 'DEPLOY_RUNTIME',
+            choices: ['local-docker'],
+            description: 'Confirmed deployment runtime platform'
+        )
+        string(
+            name: 'TRUSTED_DEPLOY_BRANCHES',
+            defaultValue: 'master,main,release/*',
+            description: 'Comma-separated branch patterns allowed to publish and deploy images'
+        )
+        string(
+            name: 'PROMOTE_IMAGE_TAG',
+            defaultValue: '',
+            description: 'Existing immutable image tag to promote to the selected environment. Leave blank to build a new image.'
+        )
+        booleanParam(
+            name: 'ENFORCE_DEPENDENCY_SCAN',
+            defaultValue: true,
+            description: 'Fail the build when pip-audit finds dependency vulnerabilities'
+        )
+        booleanParam(
+            name: 'ENFORCE_IMAGE_SCAN',
+            defaultValue: true,
+            description: 'Fail the build when Trivy finds HIGH or CRITICAL image vulnerabilities'
         )
     }
 
@@ -56,14 +86,19 @@ pipeline {
     environment {
         // Docker / deploy
         IMAGE_NAME             = 'mysimplepython-app'
-        CONTAINER_NAME         = 'mysimplepython-app-container'
+        BASE_CONTAINER_NAME    = 'mysimplepython-app-container'
         JENKINS_CONTAINER_NAME = 'jenkins'
-        HOST_PORT              = '8081'
         APP_PORT               = '8081'
-        APP_BASE_URL           = "http://${CONTAINER_NAME}:${APP_PORT}"
         HEALTH_PATH            = '/health'
-        HEALTH_URL             = "http://${CONTAINER_NAME}:${APP_PORT}${HEALTH_PATH}"
+        DOCKER_REGISTRY        = 'docker.io'
         IMAGE_TAG              = "${env.BUILD_NUMBER}"
+        MOVING_IMAGE_TAG       = 'latest'
+        GIT_COMMIT_SHORT       = 'unknown'
+        GIT_COMMIT_FULL        = 'unknown'
+        BUILD_DATE_UTC         = 'unknown'
+        BUILD_IMAGE            = 'true'
+        IMAGE_PUSH_ENABLED     = 'false'
+        DEPLOY_ENABLED         = 'false'
 
         // Quality / timing gates
         COVERAGE_MIN           = '80'
@@ -91,36 +126,144 @@ pipeline {
         stage('Prepare Metadata') {
             steps {
                 script {
-                    def commit = sh(
+                    configureDeploymentEnvironment()
+
+                    def shortCommit = sh(
                         script: 'git rev-parse --short HEAD',
                         returnStdout: true
                     ).trim()
+                    def fullCommit = sh(
+                        script: 'git rev-parse HEAD',
+                        returnStdout: true
+                    ).trim()
+                    def buildDate = sh(
+                        script: "date -u +%Y-%m-%dT%H:%M:%SZ",
+                        returnStdout: true
+                    ).trim()
+                    def safeBranch = sanitizeTag(params.GIT_BRANCH)
 
-                    env.IMAGE_TAG = "${env.BUILD_NUMBER}-${commit}"
+                    env.GIT_COMMIT_SHORT = shortCommit
+                    env.GIT_COMMIT_FULL = fullCommit
+                    env.BUILD_DATE_UTC = buildDate
+                    env.MOVING_IMAGE_TAG = "${safeBranch}-latest"
+                    env.BUILD_IMAGE = params.PROMOTE_IMAGE_TAG?.trim() ? 'false' : 'true'
+                    env.IMAGE_TAG = params.PROMOTE_IMAGE_TAG?.trim() ?: "${env.BUILD_NUMBER}-${shortCommit}"
+                    env.IMAGE_PUSH_ENABLED = isTrustedBranch(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) ? 'true' : 'false'
+                    env.DEPLOY_ENABLED = shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) ? 'true' : 'false'
+
+                    if (env.DEPLOY_ENABLED != 'true') {
+                        echo "Deployment disabled for untrusted branch ${params.GIT_BRANCH}; CI validation will continue."
+                    }
 
                     echo "Image tag: ${env.IMAGE_TAG}"
+                    echo "Moving tag: ${env.MOVING_IMAGE_TAG}"
+                    echo "Target environment: ${params.DEPLOY_ENV} (${params.DEPLOY_RUNTIME})"
+                }
+            }
+        }
+
+        stage('Validate Promotion Policy') {
+            steps {
+                script {
+                    if (params.DEPLOY_RUNTIME != 'local-docker') {
+                        error("Unsupported deployment runtime: ${params.DEPLOY_RUNTIME}")
+                    }
+
+                    if (env.DEPLOY_ENABLED == 'true' && ['stage', 'prod'].contains(params.DEPLOY_ENV) && env.BUILD_IMAGE == 'true') {
+                        error("${params.DEPLOY_ENV} deployments must promote an existing immutable image tag using PROMOTE_IMAGE_TAG.")
+                    }
                 }
             }
         }
 
         stage('Install Dependencies') {
+            when {
+                expression { return env.BUILD_IMAGE == 'true' }
+            }
             steps {
                 sh '''
+                    mkdir -p reports/junit reports/coverage reports/lint reports/dependency-scan reports/diagnostics
                     python -m venv venv
                     . venv/bin/activate
                     pip install --upgrade pip
                     pip install -r requirements.txt
+                    pip install pip-audit
                 '''
             }
         }
 
-        stage('Run Unit Tests') {
+        stage('Lint') {
+            when {
+                expression { return env.BUILD_IMAGE == 'true' }
+            }
+            steps {
+                echo 'Running flake8 lint checks...'
+                sh '''
+                    . venv/bin/activate
+                    flake8 app tests --statistics --tee --output-file reports/lint/flake8.log
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/lint/**'
+                }
+            }
+        }
+
+        stage('Dependency Scan') {
+            when {
+                expression { return env.BUILD_IMAGE == 'true' }
+            }
+            steps {
+                echo 'Running pip-audit dependency scan...'
+                script {
+                    def scanStatus = sh(
+                        script: '''
+                            . venv/bin/activate
+                            mkdir -p reports/dependency-scan
+                            pip-audit -r requirements.txt --format json --output reports/dependency-scan/pip-audit.json
+                        ''',
+                        returnStatus: true
+                    )
+
+                    if (scanStatus != 0 && params.ENFORCE_DEPENDENCY_SCAN) {
+                        error('Dependency scan failed. See reports/dependency-scan/pip-audit.json.')
+                    }
+
+                    if (scanStatus != 0) {
+                        echo 'Dependency scan found issues, but enforcement is disabled.'
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/dependency-scan/**'
+                }
+            }
+        }
+
+        stage('Run Unit and API Tests') {
+            when {
+                expression { return env.BUILD_IMAGE == 'true' }
+            }
             steps {
                 echo "Running unit and in-process API tests (coverage >= ${COVERAGE_MIN}%)..."
                 sh '''
                     . venv/bin/activate
-                    python -m pytest tests/test_unit.py tests/test_api.py --cov=app --cov-fail-under="${COVERAGE_MIN}"
+                    mkdir -p reports/junit reports/coverage/html
+                    python -m pytest tests/test_unit.py tests/test_api.py \
+                      --junitxml=reports/junit/unit-api-tests.xml \
+                      --cov=app \
+                      --cov-report=xml:reports/coverage/coverage.xml \
+                      --cov-report=html:reports/coverage/html \
+                      --cov-fail-under="${COVERAGE_MIN}"
                 '''
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'reports/junit/*.xml'
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/coverage/**'
+                }
             }
         }
 
@@ -131,28 +274,126 @@ pipeline {
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
-                    sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
+                    sh 'echo "$DOCKER_PASS" | docker login "$DOCKER_REGISTRY" -u "$DOCKER_USER" --password-stdin'
                 }
             }
         }
 
-        stage('Build & Push Image') {
+        stage('Build Image') {
+            when {
+                expression { return env.BUILD_IMAGE == 'true' }
+            }
             steps {
-                echo "Building and pushing ${env.IMAGE_NAME}:${env.IMAGE_TAG}..."
+                echo "Building ${env.IMAGE_NAME}:${env.IMAGE_TAG}..."
                 withCredentials([usernamePassword(
                     credentialsId: params.DOCKER_CRED_ID,
                     usernameVariable: 'DOCKER_USER',
                     passwordVariable: 'DOCKER_PASS'
                 )]) {
                     sh '''
-                        docker build -t "$DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG}" .
-                        docker push "$DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG}"
+                        IMAGE_REPO="$DOCKER_REGISTRY/$DOCKER_USER/$IMAGE_NAME"
+                        docker build \
+                          --build-arg "BUILD_DATE=${BUILD_DATE_UTC}" \
+                          --build-arg "VCS_REF=${GIT_COMMIT_FULL}" \
+                          --build-arg "VERSION=${IMAGE_TAG}" \
+                          --build-arg "BUILD_URL=${BUILD_URL}" \
+                          --label "org.opencontainers.image.created=${BUILD_DATE_UTC}" \
+                          --label "org.opencontainers.image.revision=${GIT_COMMIT_FULL}" \
+                          --label "org.opencontainers.image.version=${IMAGE_TAG}" \
+                          --label "org.opencontainers.image.source=${GIT_REPO_URL}" \
+                          --label "ci.jenkins.branch=${GIT_BRANCH}" \
+                          --label "ci.jenkins.build_number=${BUILD_NUMBER}" \
+                          --label "ci.jenkins.build_url=${BUILD_URL}" \
+                          -t "$IMAGE_REPO:${IMAGE_TAG}" \
+                          -t "$IMAGE_REPO:${MOVING_IMAGE_TAG}" \
+                          .
+                    '''
+                }
+            }
+        }
+
+        stage('Image Scan') {
+            steps {
+                echo "Scanning image ${env.IMAGE_TAG}..."
+                script {
+                    def scannerStatus = sh(
+                        script: 'command -v trivy >/dev/null 2>&1',
+                        returnStatus: true
+                    )
+
+                    if (scannerStatus != 0) {
+                        sh 'mkdir -p reports/image-scan'
+                        writeFile file: 'reports/image-scan/trivy.txt', text: 'Trivy is not installed on this Jenkins agent.\n'
+                        if (params.ENFORCE_IMAGE_SCAN) {
+                            error('Trivy is required for enforced image scanning.')
+                        }
+                        echo 'Trivy is not installed; image scan enforcement is disabled for this run.'
+                        return
+                    }
+
+                    withCredentials([usernamePassword(
+                        credentialsId: params.DOCKER_CRED_ID,
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )]) {
+                        def scanStatus = sh(
+                            script: '''
+                                mkdir -p reports/image-scan
+                                IMAGE_REPO="$DOCKER_REGISTRY/$DOCKER_USER/$IMAGE_NAME"
+                                if [ "$BUILD_IMAGE" != "true" ]; then
+                                    docker pull "$IMAGE_REPO:${IMAGE_TAG}"
+                                fi
+                                trivy image \
+                                  --severity HIGH,CRITICAL \
+                                  --format table \
+                                  --output reports/image-scan/trivy.txt \
+                                  --exit-code 1 \
+                                  "$IMAGE_REPO:${IMAGE_TAG}"
+                            ''',
+                            returnStatus: true
+                        )
+
+                        if (scanStatus != 0 && params.ENFORCE_IMAGE_SCAN) {
+                            error('Image scan failed. See reports/image-scan/trivy.txt.')
+                        }
+
+                        if (scanStatus != 0) {
+                            echo 'Image scan found issues, but enforcement is disabled.'
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/image-scan/**'
+                }
+            }
+        }
+
+        stage('Push Image') {
+            when {
+                expression { return env.BUILD_IMAGE == 'true' && env.IMAGE_PUSH_ENABLED == 'true' }
+            }
+            steps {
+                echo "Pushing ${env.IMAGE_NAME}:${env.IMAGE_TAG} and ${env.MOVING_IMAGE_TAG}..."
+                withCredentials([usernamePassword(
+                    credentialsId: params.DOCKER_CRED_ID,
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh '''
+                        IMAGE_REPO="$DOCKER_REGISTRY/$DOCKER_USER/$IMAGE_NAME"
+                        docker push "$IMAGE_REPO:${IMAGE_TAG}"
+                        docker push "$IMAGE_REPO:${MOVING_IMAGE_TAG}"
                     '''
                 }
             }
         }
 
         stage('Capture Previous Version') {
+            when {
+                expression { return env.DEPLOY_ENABLED == 'true' }
+            }
             steps {
                 script {
                     PREVIOUS_IMAGE = sh(
@@ -179,46 +420,56 @@ pipeline {
                     echo "Previous image: ${PREVIOUS_IMAGE}"
                     echo "Docker network: ${env.DOCKER_NETWORK}"
                     echo "Health URL: ${env.HEALTH_URL}"
+                    echo "Container name: ${env.CONTAINER_NAME}"
                 }
             }
         }
 
         stage('Manual Approval') {
             when {
-                expression { return !params.SKIP_APPROVAL }
+                expression { return env.DEPLOY_ENABLED == 'true' && requiresManualApproval(params.DEPLOY_ENV, params.SKIP_APPROVAL) }
             }
             steps {
                 script {
                     timeout(time: env.APPROVAL_TIMEOUT_HOURS.toInteger(), unit: 'HOURS') {
-                        input message: "Approve deployment of ${env.IMAGE_NAME}:${env.IMAGE_TAG} to Test?", ok: 'Deploy'
+                        input message: "Approve deployment of ${env.IMAGE_NAME}:${env.IMAGE_TAG} to ${params.DEPLOY_ENV}?", ok: 'Deploy'
                     }
                 }
             }
         }
 
-        stage('Deploy to Test (Local Container)') {
+        stage('Deploy Local Container') {
+            when {
+                expression { return env.DEPLOY_ENABLED == 'true' }
+            }
             steps {
                 script {
                     try {
-                        echo 'Deploying to test environment...'
+                        echo "Deploying to ${params.DEPLOY_ENV} on ${params.DEPLOY_RUNTIME}..."
                         withCredentials([usernamePassword(
                             credentialsId: params.DOCKER_CRED_ID,
                             usernameVariable: 'DOCKER_USER',
                             passwordVariable: 'DOCKER_PASS'
                         )]) {
                             sh '''
+                                IMAGE_REPO="$DOCKER_REGISTRY/$DOCKER_USER/$IMAGE_NAME"
                                 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-                                docker pull "$DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG}"
+                                docker pull "$IMAGE_REPO:${IMAGE_TAG}"
                                 docker run -d \
                                   --network "$DOCKER_NETWORK" \
+                                  --read-only \
+                                  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+                                  --cap-drop ALL \
+                                  --security-opt no-new-privileges \
                                   -e "APP_VERSION=${IMAGE_TAG}" \
                                   -p "${HOST_PORT}:${APP_PORT}" \
                                   --name "$CONTAINER_NAME" \
-                                  "$DOCKER_USER/$IMAGE_NAME:${IMAGE_TAG}"
+                                  "$IMAGE_REPO:${IMAGE_TAG}"
                             '''
                         }
                     } catch (err) {
                         echo "Deployment failed: ${err}"
+                        captureDeploymentDiagnostics('deploy')
                         def rolledBack = rollback(validate: true)
                         if (rolledBack) {
                             error('Deployment failed. Rolled back to previous version.')
@@ -231,21 +482,26 @@ pipeline {
         }
 
         stage('Health Check') {
+            when {
+                expression { return env.DEPLOY_ENABLED == 'true' }
+            }
             steps {
                 script {
                     def status = sh(
                         script: """
+                            mkdir -p reports/diagnostics/health-check
                             sleep 5
                             for i in \$(seq 1 ${env.HEALTH_RETRIES}); do
                                 status=\$(curl -s -o /dev/null -w '%{http_code}' '${env.HEALTH_URL}' || true)
                                 if [ "\$status" = "200" ]; then
-                                    echo "App ready"
+                                    echo "App ready" | tee -a reports/diagnostics/health-check/health-check.log
                                     exit 0
                                 fi
-                                echo "Not ready yet... (\$i)"
+                                echo "Not ready yet... (\$i): HTTP \$status" | tee -a reports/diagnostics/health-check/health-check.log
                                 sleep 2
                             done
-                            echo "Health timeout"
+                            curl -sv '${env.HEALTH_URL}' > reports/diagnostics/health-check/health-response.txt 2>&1 || true
+                            echo "Health timeout" | tee -a reports/diagnostics/health-check/health-check.log
                             exit 1
                         """,
                         returnStatus: true
@@ -253,6 +509,7 @@ pipeline {
 
                     if (status != 0) {
                         echo 'Health check failed. Initiating rollback...'
+                        captureDeploymentDiagnostics('health-check')
                         def rolledBack = rollback(validate: true)
                         if (rolledBack) {
                             error('Health check failed. Rolled back to previous version.')
@@ -265,6 +522,9 @@ pipeline {
         }
 
         stage('Functional Tests') {
+            when {
+                expression { return env.DEPLOY_ENABLED == 'true' }
+            }
             steps {
                 script {
                     try {
@@ -285,6 +545,7 @@ pipeline {
                         }
                     } catch (err) {
                         echo "Functional tests failed: ${err}"
+                        captureDeploymentDiagnostics('functional-tests')
                         def rolledBack = rollback(validate: true)
                         if (rolledBack) {
                             error('Functional tests failed after deployment. Rolled back to previous version.')
@@ -296,6 +557,8 @@ pipeline {
             }
             post {
                 always {
+                    junit allowEmptyResults: true, testResults: 'functional-tests/target/surefire-reports/*.xml'
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'functional-tests/target/surefire-reports/**'
                     script {
                         if (fileExists('functional-tests/target/allure-results')) {
                             allure([
@@ -314,17 +577,24 @@ pipeline {
         }
 
         stage('Stability Check') {
+            when {
+                expression { return env.DEPLOY_ENABLED == 'true' }
+            }
             steps {
                 script {
                     echo "Monitoring stability (${env.STABILITY_CHECKS} checks, 2s apart)..."
 
                     def stable = sh(
                         script: """
+                            mkdir -p reports/diagnostics/stability-check
                             for i in \$(seq 1 ${env.STABILITY_CHECKS}); do
                                 status=\$(curl -s -o /dev/null -w '%{http_code}' '${env.HEALTH_URL}' || true)
                                 if [ "\$status" != "200" ]; then
+                                    echo "Stability check \$i failed with HTTP \$status" | tee -a reports/diagnostics/stability-check/stability-check.log
+                                    curl -sv '${env.HEALTH_URL}' > reports/diagnostics/stability-check/health-response.txt 2>&1 || true
                                     exit 1
                                 fi
+                                echo "Stability check \$i passed" | tee -a reports/diagnostics/stability-check/stability-check.log
                                 sleep 2
                             done
                             exit 0
@@ -334,6 +604,7 @@ pipeline {
 
                     if (stable != 0) {
                         echo 'Stability check failed. Initiating rollback...'
+                        captureDeploymentDiagnostics('stability-check')
                         def rolledBack = rollback(validate: true)
                         if (rolledBack) {
                             error('Application became unstable after deployment. Rolled back to previous version.')
@@ -350,13 +621,14 @@ pipeline {
         stage('Cleanup Workspace') {
             steps {
                 script {
-                    if (!params.LEAVE_CONTAINER_RUNNING) {
+                    if (env.DEPLOY_ENABLED == 'true' && !params.LEAVE_CONTAINER_RUNNING) {
                         sh 'docker rm -f "$CONTAINER_NAME" || true'
-                    } else {
+                    } else if (env.DEPLOY_ENABLED == 'true') {
                         echo "Leaving container ${env.CONTAINER_NAME} running on port ${env.HOST_PORT}."
+                    } else {
+                        echo 'No deployment container cleanup needed.'
                     }
                     sh 'docker image prune -f || true'
-                    cleanWs()
                 }
             }
         }
@@ -364,15 +636,110 @@ pipeline {
 
     post {
         always {
-            sh 'docker logout || true'
+            script {
+                publishPipelineArtifacts()
+            }
+            sh 'docker logout "$DOCKER_REGISTRY" || true'
         }
         success {
-            echo "Release ${env.IMAGE_TAG} from ${params.GIT_BRANCH} deployed successfully."
+            echo "Release ${env.IMAGE_TAG} from ${params.GIT_BRANCH} completed successfully for ${params.DEPLOY_ENV}."
         }
         failure {
             echo "Release ${env.IMAGE_TAG} from ${params.GIT_BRANCH} failed. Check logs."
         }
+        cleanup {
+            cleanWs()
+        }
     }
+}
+
+def configureDeploymentEnvironment() {
+    def ports = [
+        dev  : '8081',
+        test : '8082',
+        stage: '8083',
+        prod : '8084'
+    ]
+    def target = params.DEPLOY_ENV ?: 'dev'
+    def hostPort = ports[target]
+
+    if (!hostPort) {
+        error("Unsupported deployment environment: ${target}")
+    }
+
+    env.CONTAINER_NAME = "${env.BASE_CONTAINER_NAME}-${target}"
+    env.HOST_PORT = hostPort
+    env.APP_BASE_URL = "http://${env.CONTAINER_NAME}:${env.APP_PORT}"
+    env.HEALTH_URL = "${env.APP_BASE_URL}${env.HEALTH_PATH}"
+}
+
+def shouldDeploy(String branch, String trustedPatterns) {
+    return isTrustedBranch(branch, trustedPatterns)
+}
+
+def isTrustedBranch(String branch, String trustedPatterns) {
+    def current = normalizeBranch(branch)
+    return trustedPatterns
+        .split(',')
+        .collect { it.trim() }
+        .findAll { it }
+        .any { pattern -> branchMatches(current, pattern) }
+}
+
+def branchMatches(String branch, String pattern) {
+    def normalizedPattern = normalizeBranch(pattern)
+
+    if (normalizedPattern.endsWith('/*')) {
+        return branch.startsWith(normalizedPattern[0..-2])
+    }
+
+    return branch == normalizedPattern
+}
+
+def normalizeBranch(String branch) {
+    return (branch ?: '').replaceFirst(/^origin\//, '').replaceFirst(/^\*\//, '')
+}
+
+def sanitizeTag(String value) {
+    def tag = normalizeBranch(value).toLowerCase().replaceAll(/[^a-z0-9_.-]+/, '-')
+    tag = tag.replaceAll(/^-+/, '').replaceAll(/-+$/, '')
+    return tag ?: 'branch'
+}
+
+def requiresManualApproval(String targetEnv, boolean skipApproval) {
+    if (['stage', 'prod'].contains(targetEnv)) {
+        return true
+    }
+
+    return !skipApproval
+}
+
+def captureDeploymentDiagnostics(String reason) {
+    def safeReason = sanitizeTag(reason)
+
+    sh """
+        mkdir -p 'reports/diagnostics/${safeReason}'
+        {
+            echo 'reason=${safeReason}'
+            echo 'environment=${params.DEPLOY_ENV}'
+            echo 'runtime=${params.DEPLOY_RUNTIME}'
+            echo 'image_tag=${env.IMAGE_TAG}'
+            echo 'container=${env.CONTAINER_NAME}'
+            echo 'health_url=${env.HEALTH_URL}'
+            date -u +%Y-%m-%dT%H:%M:%SZ
+        } > 'reports/diagnostics/${safeReason}/context.txt' 2>&1 || true
+        docker ps -a --filter "name=${env.CONTAINER_NAME}" > 'reports/diagnostics/${safeReason}/docker-ps.txt' 2>&1 || true
+        docker inspect '${env.CONTAINER_NAME}' > 'reports/diagnostics/${safeReason}/docker-inspect.json' 2>&1 || true
+        docker logs --timestamps '${env.CONTAINER_NAME}' > 'reports/diagnostics/${safeReason}/container.log' 2>&1 || true
+        curl -sv '${env.HEALTH_URL}' > 'reports/diagnostics/${safeReason}/health-response.txt' 2>&1 || true
+    """
+
+    archiveArtifacts allowEmptyArchive: true, artifacts: "reports/diagnostics/${safeReason}/**"
+}
+
+def publishPipelineArtifacts() {
+    junit allowEmptyResults: true, testResults: 'reports/junit/*.xml, functional-tests/target/surefire-reports/*.xml'
+    archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/lint/**, reports/dependency-scan/**, reports/coverage/**, reports/image-scan/**, reports/diagnostics/**, functional-tests/target/surefire-reports/**, functional-tests/target/allure-results/**'
 }
 
 /**
@@ -403,6 +770,10 @@ def rollback(Map args = [:]) {
         docker rm -f '${container}' || true
         docker run -d \
           --network '${network}' \
+          --read-only \
+          --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+          --cap-drop ALL \
+          --security-opt no-new-privileges \
           -p '${hostPort}:${appPort}' \
           --name '${container}' \
           '${previous}'

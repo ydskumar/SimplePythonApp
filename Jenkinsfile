@@ -96,14 +96,6 @@ pipeline {
         APP_PORT               = '8081'
         HEALTH_PATH            = '/health'
         DOCKER_REGISTRY        = 'docker.io'
-        IMAGE_TAG              = "${env.BUILD_NUMBER}"
-        MOVING_IMAGE_TAG       = 'latest'
-        GIT_COMMIT_SHORT       = 'unknown'
-        GIT_COMMIT_FULL        = 'unknown'
-        BUILD_DATE_UTC         = 'unknown'
-        BUILD_IMAGE            = 'true'
-        IMAGE_PUSH_ENABLED     = 'false'
-        DEPLOY_ENABLED         = 'false'
 
         // Quality / timing gates
         COVERAGE_MIN           = '80'

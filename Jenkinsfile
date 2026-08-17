@@ -680,22 +680,10 @@ def shouldDeploy(String branch, String trustedPatterns) {
 }
 
 def getPromoteImageTag() {
-    return parameterValue('PROMOTE_IMAGE_TAG')
-        ?: parameterValue('DEPLOY_IMAGE_TAG')
-        ?: environmentValue('PROMOTE_IMAGE_TAG')
-        ?: environmentValue('DEPLOY_IMAGE_TAG')
-}
+    def promoteTag = params.PROMOTE_IMAGE_TAG ? params.PROMOTE_IMAGE_TAG.toString().trim() : ''
+    def deployTag = params.DEPLOY_IMAGE_TAG ? params.DEPLOY_IMAGE_TAG.toString().trim() : ''
 
-def parameterValue(String name) {
-    if (!params.containsKey(name) || params[name] == null) {
-        return ''
-    }
-
-    return params[name].toString().trim()
-}
-
-def environmentValue(String name) {
-    return env[name]?.toString()?.trim() ?: ''
+    return promoteTag ?: deployTag
 }
 
 def isTrustedBranch(String branch, String trustedPatterns) {

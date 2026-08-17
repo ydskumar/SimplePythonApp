@@ -172,7 +172,7 @@ pipeline {
                         error("Unsupported deployment runtime: ${params.DEPLOY_RUNTIME}")
                     }
 
-                    if (env.DEPLOY_ENABLED == 'true' && ['stage', 'prod'].contains(params.DEPLOY_ENV) && env.BUILD_IMAGE == 'true') {
+                    if (shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) && ['stage', 'prod'].contains(params.DEPLOY_ENV) && env.BUILD_IMAGE == 'true') {
                         error("${params.DEPLOY_ENV} deployments must promote an existing immutable image tag using PROMOTE_IMAGE_TAG.")
                     }
                 }
@@ -395,7 +395,7 @@ pipeline {
 
         stage('Capture Previous Version') {
             when {
-                expression { return env.DEPLOY_ENABLED == 'true' }
+                expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) }
             }
             steps {
                 script {
@@ -430,7 +430,7 @@ pipeline {
 
         stage('Manual Approval') {
             when {
-                expression { return env.DEPLOY_ENABLED == 'true' && requiresManualApproval(params.DEPLOY_ENV, params.SKIP_APPROVAL) }
+                expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) && requiresManualApproval(params.DEPLOY_ENV, params.SKIP_APPROVAL) }
             }
             steps {
                 script {
@@ -443,7 +443,7 @@ pipeline {
 
         stage('Deploy Local Container') {
             when {
-                expression { return env.DEPLOY_ENABLED == 'true' }
+                expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) }
             }
             steps {
                 script {
@@ -486,7 +486,7 @@ pipeline {
 
         stage('Health Check') {
             when {
-                expression { return env.DEPLOY_ENABLED == 'true' }
+                expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) }
             }
             steps {
                 script {
@@ -526,7 +526,7 @@ pipeline {
 
         stage('Functional Tests') {
             when {
-                expression { return env.DEPLOY_ENABLED == 'true' }
+                expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) }
             }
             steps {
                 script {
@@ -581,7 +581,7 @@ pipeline {
 
         stage('Stability Check') {
             when {
-                expression { return env.DEPLOY_ENABLED == 'true' }
+                expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) }
             }
             steps {
                 script {
@@ -624,9 +624,9 @@ pipeline {
         stage('Cleanup Workspace') {
             steps {
                 script {
-                    if (env.DEPLOY_ENABLED == 'true' && !params.LEAVE_CONTAINER_RUNNING) {
+                    if (shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) && !params.LEAVE_CONTAINER_RUNNING) {
                         sh 'docker rm -f "$CONTAINER_NAME" || true'
-                    } else if (env.DEPLOY_ENABLED == 'true') {
+                    } else if (shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES)) {
                         echo "Leaving container ${env.CONTAINER_NAME} running on port ${env.HOST_PORT}."
                     } else {
                         echo 'No deployment container cleanup needed.'

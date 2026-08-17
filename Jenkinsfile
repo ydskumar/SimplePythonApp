@@ -157,6 +157,9 @@ pipeline {
 
                     echo "Image tag: ${env.IMAGE_TAG}"
                     echo "Moving tag: ${env.MOVING_IMAGE_TAG}"
+                    echo "Build image: ${env.BUILD_IMAGE}"
+                    echo "Image push enabled: ${env.IMAGE_PUSH_ENABLED}"
+                    echo "Deploy enabled: ${env.DEPLOY_ENABLED}"
                     echo "Target environment: ${params.DEPLOY_ENV} (${params.DEPLOY_RUNTIME})"
                 }
             }
@@ -372,7 +375,7 @@ pipeline {
 
         stage('Push Image') {
             when {
-                expression { return env.BUILD_IMAGE == 'true' && env.IMAGE_PUSH_ENABLED == 'true' }
+                expression { return env.BUILD_IMAGE == 'true' && isTrustedBranch(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) }
             }
             steps {
                 echo "Pushing ${env.IMAGE_NAME}:${env.IMAGE_TAG} and ${env.MOVING_IMAGE_TAG}..."
@@ -697,7 +700,11 @@ def branchMatches(String branch, String pattern) {
 }
 
 def normalizeBranch(String branch) {
-    return (branch ?: '').replaceFirst(/^origin\//, '').replaceFirst(/^\*\//, '')
+    return (branch ?: '')
+        .trim()
+        .replaceFirst(/^refs\/heads\//, '')
+        .replaceFirst(/^origin\//, '')
+        .replaceFirst(/^\*\//, '')
 }
 
 def sanitizeTag(String value) {

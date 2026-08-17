@@ -64,11 +64,6 @@ pipeline {
             defaultValue: '',
             description: 'Existing immutable image tag to promote to the selected environment. Leave blank to build a new image.'
         )
-        string(
-            name: 'DEPLOY_IMAGE_TAG',
-            defaultValue: '',
-            description: 'Optional alias for PROMOTE_IMAGE_TAG. Use the exact existing Docker image tag to deploy.'
-        )
         booleanParam(
             name: 'ENFORCE_DEPENDENCY_SCAN',
             defaultValue: true,
@@ -172,7 +167,7 @@ pipeline {
                     }
 
                     if (shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) && ['stage', 'prod'].contains(params.DEPLOY_ENV) && !getPromoteImageTag()) {
-                        error("${params.DEPLOY_ENV} deployments must promote an existing immutable image tag using PROMOTE_IMAGE_TAG or DEPLOY_IMAGE_TAG.")
+                        error("${params.DEPLOY_ENV} deployments must promote an existing immutable image tag using PROMOTE_IMAGE_TAG.")
                     }
                 }
             }
@@ -680,10 +675,7 @@ def shouldDeploy(String branch, String trustedPatterns) {
 }
 
 def getPromoteImageTag() {
-    def promoteTag = params.PROMOTE_IMAGE_TAG ? params.PROMOTE_IMAGE_TAG.toString().trim() : ''
-    def deployTag = params.DEPLOY_IMAGE_TAG ? params.DEPLOY_IMAGE_TAG.toString().trim() : ''
-
-    return promoteTag ?: deployTag
+    return params.PROMOTE_IMAGE_TAG ? params.PROMOTE_IMAGE_TAG.toString().trim() : ''
 }
 
 def isTrustedBranch(String branch, String trustedPatterns) {

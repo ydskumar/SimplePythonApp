@@ -15,17 +15,20 @@ LABEL org.opencontainers.image.title="SimplePythonApp" \
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
+    PIP_ROOT_USER_ACTION=ignore \
     PORT=8081
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN python -m pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt \
-    && adduser --system --group --home /app appuser \
+RUN adduser --system --group --home /app appuser \
     && chown appuser:appuser /app
 
-COPY --chown=appuser:appuser . .
+COPY requirements-runtime.txt .
+RUN python -m pip install --upgrade pip --root-user-action=ignore \
+    && pip install --no-cache-dir --root-user-action=ignore -r requirements-runtime.txt
+
+COPY --chown=appuser:appuser app ./app
+COPY --chown=appuser:appuser run.py .
 
 EXPOSE 8081
 

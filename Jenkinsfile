@@ -177,7 +177,7 @@ pipeline {
         stage('Validate Promotion Policy') {
             steps {
                 script {
-                    if (params.DEPLOY_RUNTIME != 'local-docker') {
+                    if (!['local-docker', 'remote-docker'].contains(params.DEPLOY_RUNTIME)) {
                         error("Unsupported deployment runtime: ${params.DEPLOY_RUNTIME}")
                     }
 

@@ -56,7 +56,7 @@ pipeline {
         )
         string(
             name: 'REMOTE_DOCKER_HOST',
-            defaultValue: '',
+            defaultValue: 'us2vtcan02.consiliotest.com',
             description: 'Remote VM hostname or IP for remote-docker deployments'
         )
         string(

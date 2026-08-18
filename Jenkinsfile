@@ -51,8 +51,23 @@ pipeline {
         )
         choice(
             name: 'DEPLOY_RUNTIME',
-            choices: ['local-docker'],
-            description: 'Confirmed deployment runtime platform'
+            choices: ['local-docker', 'remote-docker'],
+            description: 'Deployment runtime platform'
+        )
+        string(
+            name: 'REMOTE_DOCKER_HOST',
+            defaultValue: '',
+            description: 'Remote VM hostname or IP for remote-docker deployments'
+        )
+        string(
+            name: 'REMOTE_DOCKER_SSH_PORT',
+            defaultValue: '22',
+            description: 'SSH port for the remote Docker VM'
+        )
+        string(
+            name: 'REMOTE_DOCKER_SSH_CRED_ID',
+            defaultValue: 'RemoteDockerVmSshKey',
+            description: 'Jenkins SSH private key credential ID for the remote Docker VM'
         )
         string(
             name: 'TRUSTED_DEPLOY_BRANCHES',
@@ -393,29 +408,48 @@ pipeline {
             }
             steps {
                 script {
-                    PREVIOUS_IMAGE = sh(
-                        script: "docker inspect --format='{{.Config.Image}}' ${env.CONTAINER_NAME} 2>/dev/null || echo 'none'",
-                        returnStdout: true
-                    ).trim()
-                    env.PREVIOUS_IMAGE = PREVIOUS_IMAGE
+                    if (isRemoteDeploy()) {
+                        withRemoteDockerVm {
+                            PREVIOUS_IMAGE = sh(
+                                script: '''
+                                    ssh -i "$REMOTE_SSH_KEY" \
+                                      -p "$REMOTE_DOCKER_SSH_PORT" \
+                                      -o BatchMode=yes \
+                                      -o StrictHostKeyChecking=no \
+                                      "$REMOTE_SSH_USER@$REMOTE_DOCKER_HOST" \
+                                      "docker inspect --format='{{.Config.Image}}' '$CONTAINER_NAME' 2>/dev/null || echo 'none'"
+                                ''',
+                                returnStdout: true
+                            ).trim()
+                        }
+                    } else {
+                        PREVIOUS_IMAGE = sh(
+                            script: "docker inspect --format='{{.Config.Image}}' ${env.CONTAINER_NAME} 2>/dev/null || echo 'none'",
+                            returnStdout: true
+                        ).trim()
 
-                    def network = sh(
-                        script: '''
-                            docker inspect "$JENKINS_CONTAINER_NAME" --format='{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' 2>/dev/null \
-                            | head -n1 \
-                            || true
-                        ''',
-                        returnStdout: true
-                    ).trim()
+                        def network = sh(
+                            script: '''
+                                docker inspect "$JENKINS_CONTAINER_NAME" --format='{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' 2>/dev/null \
+                                | head -n1 \
+                                || true
+                            ''',
+                            returnStdout: true
+                        ).trim()
 
-                    if (!network) {
-                        error("Unable to detect Docker network for ${env.JENKINS_CONTAINER_NAME}.")
+                        if (!network) {
+                            error("Unable to detect Docker network for ${env.JENKINS_CONTAINER_NAME}.")
+                        }
+
+                        env.DOCKER_NETWORK = network
                     }
 
-                    env.DOCKER_NETWORK = network
+                    env.PREVIOUS_IMAGE = PREVIOUS_IMAGE
 
                     echo "Previous image: ${PREVIOUS_IMAGE}"
-                    echo "Docker network: ${env.DOCKER_NETWORK}"
+                    if (!isRemoteDeploy()) {
+                        echo "Docker network: ${env.DOCKER_NETWORK}"
+                    }
                     echo "Health URL: ${env.HEALTH_URL}"
                     echo "Container name: ${env.CONTAINER_NAME}"
                 }
@@ -435,7 +469,7 @@ pipeline {
             }
         }
 
-        stage('Deploy Local Container') {
+        stage('Deploy Docker Container') {
             when {
                 expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) }
             }
@@ -443,26 +477,10 @@ pipeline {
                 script {
                     try {
                         echo "Deploying to ${params.DEPLOY_ENV} on ${params.DEPLOY_RUNTIME}..."
-                        withCredentials([usernamePassword(
-                            credentialsId: params.DOCKER_CRED_ID,
-                            usernameVariable: 'DOCKER_USER',
-                            passwordVariable: 'DOCKER_PASS'
-                        )]) {
-                            sh '''
-                                IMAGE_REPO="$DOCKER_REGISTRY/$DOCKER_USER/$IMAGE_NAME"
-                                docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-                                docker pull "$IMAGE_REPO:${IMAGE_TAG}"
-                                docker run -d \
-                                  --network "$DOCKER_NETWORK" \
-                                  --read-only \
-                                  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
-                                  --cap-drop ALL \
-                                  --security-opt no-new-privileges \
-                                  -e "APP_VERSION=${IMAGE_TAG}" \
-                                  -p "${HOST_PORT}:${APP_PORT}" \
-                                  --name "$CONTAINER_NAME" \
-                                  "$IMAGE_REPO:${IMAGE_TAG}"
-                            '''
+                        if (isRemoteDeploy()) {
+                            deployRemoteContainer()
+                        } else {
+                            deployLocalContainer()
                         }
                     } catch (err) {
                         echo "Deployment failed: ${err}"
@@ -619,13 +637,39 @@ pipeline {
             steps {
                 script {
                     if (shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) && !params.LEAVE_CONTAINER_RUNNING) {
-                        sh 'docker rm -f "$CONTAINER_NAME" || true'
+                        if (isRemoteDeploy()) {
+                            withRemoteDockerVm {
+                                sh '''
+                                    ssh -i "$REMOTE_SSH_KEY" \
+                                      -p "$REMOTE_DOCKER_SSH_PORT" \
+                                      -o BatchMode=yes \
+                                      -o StrictHostKeyChecking=no \
+                                      "$REMOTE_SSH_USER@$REMOTE_DOCKER_HOST" \
+                                      "docker rm -f '$CONTAINER_NAME' || true"
+                                '''
+                            }
+                        } else {
+                            sh 'docker rm -f "$CONTAINER_NAME" || true'
+                        }
                     } else if (shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES)) {
-                        echo "Leaving container ${env.CONTAINER_NAME} running on port ${env.HOST_PORT}."
+                        echo "Leaving container ${env.CONTAINER_NAME} running on ${env.APP_BASE_URL}."
                     } else {
                         echo 'No deployment container cleanup needed.'
                     }
-                    sh 'docker image prune -f || true'
+                    if (isRemoteDeploy()) {
+                        withRemoteDockerVm {
+                            sh '''
+                                ssh -i "$REMOTE_SSH_KEY" \
+                                  -p "$REMOTE_DOCKER_SSH_PORT" \
+                                  -o BatchMode=yes \
+                                  -o StrictHostKeyChecking=no \
+                                  "$REMOTE_SSH_USER@$REMOTE_DOCKER_HOST" \
+                                  "docker image prune -f || true"
+                            '''
+                        }
+                    } else {
+                        sh 'docker image prune -f || true'
+                    }
                 }
             }
         }
@@ -666,8 +710,105 @@ def configureDeploymentEnvironment() {
 
     env.CONTAINER_NAME = "${env.BASE_CONTAINER_NAME}-${target}"
     env.HOST_PORT = hostPort
-    env.APP_BASE_URL = "http://${env.CONTAINER_NAME}:${env.APP_PORT}"
+    if (isRemoteDeploy()) {
+        def remoteHost = (params.REMOTE_DOCKER_HOST ?: '').trim()
+        if (!remoteHost) {
+            error('REMOTE_DOCKER_HOST is required when DEPLOY_RUNTIME is remote-docker.')
+        }
+        env.APP_BASE_URL = "http://${remoteHost}:${env.HOST_PORT}"
+    } else {
+        env.APP_BASE_URL = "http://${env.CONTAINER_NAME}:${env.APP_PORT}"
+    }
     env.HEALTH_URL = "${env.APP_BASE_URL}${env.HEALTH_PATH}"
+}
+
+def isRemoteDeploy() {
+    return params.DEPLOY_RUNTIME == 'remote-docker'
+}
+
+def withRemoteDockerVm(Closure body) {
+    if (!(params.REMOTE_DOCKER_HOST ?: '').trim()) {
+        error('REMOTE_DOCKER_HOST is required when DEPLOY_RUNTIME is remote-docker.')
+    }
+
+    withCredentials([sshUserPrivateKey(
+        credentialsId: params.REMOTE_DOCKER_SSH_CRED_ID,
+        keyFileVariable: 'REMOTE_SSH_KEY',
+        usernameVariable: 'REMOTE_SSH_USER'
+    )]) {
+        withEnv([
+            "REMOTE_DOCKER_HOST=${params.REMOTE_DOCKER_HOST.trim()}",
+            "REMOTE_DOCKER_SSH_PORT=${(params.REMOTE_DOCKER_SSH_PORT ?: '22').trim()}"
+        ]) {
+            body()
+        }
+    }
+}
+
+def deployLocalContainer() {
+    withCredentials([usernamePassword(
+        credentialsId: params.DOCKER_CRED_ID,
+        usernameVariable: 'DOCKER_USER',
+        passwordVariable: 'DOCKER_PASS'
+    )]) {
+        sh '''
+            IMAGE_REPO="$DOCKER_REGISTRY/$DOCKER_USER/$IMAGE_NAME"
+            docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+            docker pull "$IMAGE_REPO:${IMAGE_TAG}"
+            docker run -d \
+              --network "$DOCKER_NETWORK" \
+              --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+              --cap-drop ALL \
+              --security-opt no-new-privileges \
+              -e "APP_VERSION=${IMAGE_TAG}" \
+              -p "${HOST_PORT}:${APP_PORT}" \
+              --name "$CONTAINER_NAME" \
+              "$IMAGE_REPO:${IMAGE_TAG}"
+        '''
+    }
+}
+
+def deployRemoteContainer() {
+    withCredentials([usernamePassword(
+        credentialsId: params.DOCKER_CRED_ID,
+        usernameVariable: 'DOCKER_USER',
+        passwordVariable: 'DOCKER_PASS'
+    )]) {
+        withRemoteDockerVm {
+            sh '''
+                IMAGE_REPO="$DOCKER_REGISTRY/$DOCKER_USER/$IMAGE_NAME"
+                REMOTE_TARGET="$REMOTE_SSH_USER@$REMOTE_DOCKER_HOST"
+                remote_ssh() {
+                    ssh -i "$REMOTE_SSH_KEY" \
+                      -p "$REMOTE_DOCKER_SSH_PORT" \
+                      -o BatchMode=yes \
+                      -o StrictHostKeyChecking=no \
+                      "$REMOTE_TARGET" "$@"
+                }
+
+                printf '%s' "$DOCKER_PASS" | remote_ssh \
+                  "docker login '$DOCKER_REGISTRY' -u '$DOCKER_USER' --password-stdin"
+
+                remote_ssh "
+                    set -eu
+                    docker rm -f '$CONTAINER_NAME' >/dev/null 2>&1 || true
+                    docker pull '$IMAGE_REPO:$IMAGE_TAG'
+                    docker run -d \
+                      --read-only \
+                      --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+                      --cap-drop ALL \
+                      --security-opt no-new-privileges \
+                      -e 'APP_VERSION=$IMAGE_TAG' \
+                      -p '$HOST_PORT:$APP_PORT' \
+                      --name '$CONTAINER_NAME' \
+                      '$IMAGE_REPO:$IMAGE_TAG'
+                "
+
+                remote_ssh "docker logout '$DOCKER_REGISTRY' || true"
+            '''
+        }
+    }
 }
 
 def shouldDeploy(String branch, String trustedPatterns) {
@@ -722,22 +863,54 @@ def requiresManualApproval(String targetEnv, boolean skipApproval) {
 def captureDeploymentDiagnostics(String reason) {
     def safeReason = sanitizeTag(reason)
 
-    sh """
-        mkdir -p 'reports/diagnostics/${safeReason}'
-        {
-            echo 'reason=${safeReason}'
-            echo 'environment=${params.DEPLOY_ENV}'
-            echo 'runtime=${params.DEPLOY_RUNTIME}'
-            echo 'image_tag=${env.IMAGE_TAG}'
-            echo 'container=${env.CONTAINER_NAME}'
-            echo 'health_url=${env.HEALTH_URL}'
-            date -u +%Y-%m-%dT%H:%M:%SZ
-        } > 'reports/diagnostics/${safeReason}/context.txt' 2>&1 || true
-        docker ps -a --filter "name=${env.CONTAINER_NAME}" > 'reports/diagnostics/${safeReason}/docker-ps.txt' 2>&1 || true
-        docker inspect '${env.CONTAINER_NAME}' > 'reports/diagnostics/${safeReason}/docker-inspect.json' 2>&1 || true
-        docker logs --timestamps '${env.CONTAINER_NAME}' > 'reports/diagnostics/${safeReason}/container.log' 2>&1 || true
-        curl -sv '${env.HEALTH_URL}' > 'reports/diagnostics/${safeReason}/health-response.txt' 2>&1 || true
-    """
+    if (isRemoteDeploy()) {
+        withRemoteDockerVm {
+            sh """
+                mkdir -p 'reports/diagnostics/${safeReason}'
+                {
+                    echo 'reason=${safeReason}'
+                    echo 'environment=${params.DEPLOY_ENV}'
+                    echo 'runtime=${params.DEPLOY_RUNTIME}'
+                    echo 'remote_host=${params.REMOTE_DOCKER_HOST}'
+                    echo 'image_tag=${env.IMAGE_TAG}'
+                    echo 'container=${env.CONTAINER_NAME}'
+                    echo 'health_url=${env.HEALTH_URL}'
+                    date -u +%Y-%m-%dT%H:%M:%SZ
+                } > 'reports/diagnostics/${safeReason}/context.txt' 2>&1 || true
+
+                REMOTE_TARGET="\$REMOTE_SSH_USER@\$REMOTE_DOCKER_HOST"
+                remote_ssh() {
+                    ssh -i "\$REMOTE_SSH_KEY" \
+                      -p "\$REMOTE_DOCKER_SSH_PORT" \
+                      -o BatchMode=yes \
+                      -o StrictHostKeyChecking=no \
+                      "\$REMOTE_TARGET" "\$@"
+                }
+
+                remote_ssh "docker ps -a --filter name='${env.CONTAINER_NAME}'" > 'reports/diagnostics/${safeReason}/docker-ps.txt' 2>&1 || true
+                remote_ssh "docker inspect '${env.CONTAINER_NAME}'" > 'reports/diagnostics/${safeReason}/docker-inspect.json' 2>&1 || true
+                remote_ssh "docker logs --timestamps '${env.CONTAINER_NAME}'" > 'reports/diagnostics/${safeReason}/container.log' 2>&1 || true
+                curl -sv '${env.HEALTH_URL}' > 'reports/diagnostics/${safeReason}/health-response.txt' 2>&1 || true
+            """
+        }
+    } else {
+        sh """
+            mkdir -p 'reports/diagnostics/${safeReason}'
+            {
+                echo 'reason=${safeReason}'
+                echo 'environment=${params.DEPLOY_ENV}'
+                echo 'runtime=${params.DEPLOY_RUNTIME}'
+                echo 'image_tag=${env.IMAGE_TAG}'
+                echo 'container=${env.CONTAINER_NAME}'
+                echo 'health_url=${env.HEALTH_URL}'
+                date -u +%Y-%m-%dT%H:%M:%SZ
+            } > 'reports/diagnostics/${safeReason}/context.txt' 2>&1 || true
+            docker ps -a --filter "name=${env.CONTAINER_NAME}" > 'reports/diagnostics/${safeReason}/docker-ps.txt' 2>&1 || true
+            docker inspect '${env.CONTAINER_NAME}' > 'reports/diagnostics/${safeReason}/docker-inspect.json' 2>&1 || true
+            docker logs --timestamps '${env.CONTAINER_NAME}' > 'reports/diagnostics/${safeReason}/container.log' 2>&1 || true
+            curl -sv '${env.HEALTH_URL}' > 'reports/diagnostics/${safeReason}/health-response.txt' 2>&1 || true
+        """
+    }
 
     archiveArtifacts allowEmptyArchive: true, artifacts: "reports/diagnostics/${safeReason}/**"
 }
@@ -748,7 +921,7 @@ def publishPipelineArtifacts() {
 }
 
 /**
- * Restore the previously running container on the same Docker network used for deploy.
+ * Restore the previously running container on the selected Docker runtime.
  * @return true if a previous image was restored, false if none was available
  */
 def rollback(Map args = [:]) {
@@ -765,24 +938,49 @@ def rollback(Map args = [:]) {
         return false
     }
 
-    if (!network) {
-        error('Unable to rollback because Docker network was not detected.')
+    if (isRemoteDeploy()) {
+        echo "Rolling back to ${previous} on remote Docker VM ${params.REMOTE_DOCKER_HOST}"
+
+        withRemoteDockerVm {
+            sh """
+                ssh -i "\$REMOTE_SSH_KEY" \
+                  -p "\$REMOTE_DOCKER_SSH_PORT" \
+                  -o BatchMode=yes \
+                  -o StrictHostKeyChecking=no \
+                  "\$REMOTE_SSH_USER@\$REMOTE_DOCKER_HOST" "
+                    set -eu
+                    docker rm -f '${container}' || true
+                    docker run -d \
+                      --read-only \
+                      --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+                      --cap-drop ALL \
+                      --security-opt no-new-privileges \
+                      -p '${hostPort}:${appPort}' \
+                      --name '${container}' \
+                      '${previous}'
+                  "
+            """
+        }
+    } else {
+        if (!network) {
+            error('Unable to rollback because Docker network was not detected.')
+        }
+
+        echo "Rolling back to ${previous} on network ${network}"
+
+        sh """
+            docker rm -f '${container}' || true
+            docker run -d \
+              --network '${network}' \
+              --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+              --cap-drop ALL \
+              --security-opt no-new-privileges \
+              -p '${hostPort}:${appPort}' \
+              --name '${container}' \
+              '${previous}'
+        """
     }
-
-    echo "Rolling back to ${previous} on network ${network}"
-
-    sh """
-        docker rm -f '${container}' || true
-        docker run -d \
-          --network '${network}' \
-          --read-only \
-          --tmpfs /tmp:rw,noexec,nosuid,size=64m \
-          --cap-drop ALL \
-          --security-opt no-new-privileges \
-          -p '${hostPort}:${appPort}' \
-          --name '${container}' \
-          '${previous}'
-    """
 
     if (validate) {
         echo "Validating rollback at ${healthUrl}..."

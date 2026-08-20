@@ -34,89 +34,6 @@ pipeline {
             defaultValue: 'DockerHubCred',
             description: 'Jenkins credentials ID for Docker Hub login'
         )
-        string(
-            name: 'APP_NAME',
-            defaultValue: 'mysimplepython-app',
-            description: 'Application name used when IMAGE_NAME is not supplied'
-        )
-        string(
-            name: 'IMAGE_NAME',
-            defaultValue: '',
-            description: 'Docker image name. Defaults to APP_NAME when blank.'
-        )
-        string(
-            name: 'BASE_CONTAINER_NAME',
-            defaultValue: '',
-            description: 'Base Docker container name. Defaults to <IMAGE_NAME>-container when blank.'
-        )
-        string(
-            name: 'APP_PORT',
-            defaultValue: '8081',
-            description: 'Port exposed by the application container'
-        )
-        string(
-            name: 'HEALTH_PATH',
-            defaultValue: '/health',
-            description: 'HTTP path used for deployment health checks'
-        )
-        string(
-            name: 'DOCKER_REGISTRY',
-            defaultValue: 'docker.io',
-            description: 'Docker registry host'
-        )
-        string(
-            name: 'DOCKER_BUILD_CONTEXT',
-            defaultValue: '.',
-            description: 'Docker build context path'
-        )
-        string(
-            name: 'DOCKERFILE_PATH',
-            defaultValue: 'Dockerfile',
-            description: 'Dockerfile path relative to the workspace'
-        )
-        text(
-            name: 'DOCKER_RUN_ARGS',
-            defaultValue: '''--read-only
-                                --tmpfs /tmp:rw,noexec,nosuid,size=64m
-                                --cap-drop ALL
-                                --security-opt no-new-privileges''',
-            description: 'Additional docker run arguments, one argument or argument pair per line'
-        )
-        text(
-            name: 'DOCKER_ENV_VARS',
-            defaultValue: 'APP_VERSION=${IMAGE_TAG}',
-            description: 'Container environment variables as KEY=VALUE lines. Supports ${ENV_NAME} placeholders.'
-        )
-        string(
-            name: 'DOCKER_NETWORK',
-            defaultValue: '',
-            description: 'Docker network for local deployments. Blank auto-detects the Jenkins container network.'
-        )
-        string(
-            name: 'JENKINS_CONTAINER_NAME',
-            defaultValue: 'jenkins',
-            description: 'Jenkins controller/agent container name used to auto-detect the local Docker network'
-        )
-        string(
-            name: 'DEV_HOST_PORT',
-            defaultValue: '8081',
-            description: 'Host port for dev deployments'
-        )
-        string(
-            name: 'TEST_HOST_PORT',
-            defaultValue: '8082',
-            description: 'Host port for test deployments'
-        )
-        string(
-            name: 'STAGE_HOST_PORT',
-            defaultValue: '8083',
-            description: 'Host port for stage deployments'
-        )
-        string(
-            name: 'PROD_HOST_PORT',
-            defaultValue: '8084',
-            description: 'Host port for prod deployments'
-        )
         booleanParam(
             name: 'SKIP_APPROVAL',
             defaultValue: false,
@@ -165,94 +82,12 @@ pipeline {
         booleanParam(
             name: 'ENFORCE_DEPENDENCY_SCAN',
             defaultValue: true,
-            description: 'Fail the build when the configured dependency scan command exits non-zero'
+            description: 'Fail the build when pip-audit finds dependency vulnerabilities'
         )
         booleanParam(
             name: 'ENFORCE_IMAGE_SCAN',
             defaultValue: true,
             description: 'Fail the build when Trivy finds HIGH or CRITICAL image vulnerabilities'
-        )
-        booleanParam(
-            name: 'HEALTH_CHECK_ENABLED',
-            defaultValue: true,
-            description: 'Run HTTP health and stability checks after deployment'
-        )
-        text(
-            name: 'INSTALL_COMMAND',
-            defaultValue: '''python -m venv venv
-                            . venv/bin/activate
-                            pip install --upgrade pip
-                            pip install -r requirements.txt
-                            pip install pip-audit''',
-            description: 'Language-specific dependency install/setup command. Leave blank to skip.'
-        )
-        text(
-            name: 'LINT_COMMAND',
-            defaultValue: '''. venv/bin/activate
-                                flake8 app tests --statistics --tee --output-file reports/lint/flake8.log''',
-            description: 'Language-specific lint command. Leave blank to skip.'
-        )
-        text(
-            name: 'DEPENDENCY_SCAN_COMMAND',
-            defaultValue: '''. venv/bin/activate
-                            pip-audit -r requirements.txt --format json --output reports/dependency-scan/pip-audit.json''',
-            description: 'Dependency scan command. Leave blank to skip.'
-        )
-        text(
-            name: 'TEST_COMMAND',
-            defaultValue: '''. venv/bin/activate
-                                python -m pytest tests/test_unit.py tests/test_api.py \
-                                --junitxml=reports/junit/unit-api-tests.xml \
-                                --cov=app \
-                                --cov-report=xml:reports/coverage/coverage.xml \
-                                --cov-report=html:reports/coverage/html \
-                                --cov-fail-under="${COVERAGE_MIN}"''',
-            description: 'Unit/API test command. Leave blank to skip.'
-        )
-        text(
-            name: 'FUNCTIONAL_TEST_COMMAND',
-            defaultValue: 'mvn -B test',
-            description: 'Functional test command. Leave blank to skip.'
-        )
-        string(
-            name: 'JUNIT_REPORTS',
-            defaultValue: 'reports/junit/*.xml',
-            description: 'JUnit report glob for primary tests. Leave blank to skip publishing.'
-        )
-        string(
-            name: 'COVERAGE_ARTIFACTS',
-            defaultValue: 'reports/coverage/**',
-            description: 'Coverage artifact glob. Leave blank to skip publishing.'
-        )
-        string(
-            name: 'LINT_ARTIFACTS',
-            defaultValue: 'reports/lint/**',
-            description: 'Lint artifact glob. Leave blank to skip publishing.'
-        )
-        string(
-            name: 'DEPENDENCY_SCAN_ARTIFACTS',
-            defaultValue: 'reports/dependency-scan/**',
-            description: 'Dependency scan artifact glob. Leave blank to skip publishing.'
-        )
-        string(
-            name: 'IMAGE_SCAN_ARTIFACTS',
-            defaultValue: 'reports/image-scan/**',
-            description: 'Image scan artifact glob. Leave blank to skip publishing.'
-        )
-        string(
-            name: 'FUNCTIONAL_TEST_JUNIT_REPORTS',
-            defaultValue: 'functional-tests/target/surefire-reports/*.xml',
-            description: 'Functional test JUnit report glob. Leave blank to skip publishing.'
-        )
-        string(
-            name: 'FUNCTIONAL_TEST_ARTIFACTS',
-            defaultValue: 'functional-tests/target/surefire-reports/**',
-            description: 'Functional test artifact glob. Leave blank to skip publishing.'
-        )
-        string(
-            name: 'ALLURE_RESULTS_PATH',
-            defaultValue: 'functional-tests/target/allure-results',
-            description: 'Allure results path. Leave blank to skip Allure publishing.'
         )
     }
 
@@ -264,12 +99,19 @@ pipeline {
     }
 
     environment {
+        // Docker / deploy
+        IMAGE_NAME             = 'mysimplepython-app'
+        BASE_CONTAINER_NAME    = 'mysimplepython-app-container'
+        JENKINS_CONTAINER_NAME = 'jenkins'
+        APP_PORT               = '8081'
+        HEALTH_PATH            = '/health'
+        DOCKER_REGISTRY        = 'docker.io'
+
         // Quality / timing gates
         COVERAGE_MIN           = '80'
         HEALTH_RETRIES         = '30'
         STABILITY_CHECKS       = '15'
         APPROVAL_TIMEOUT_HOURS = '1'
-        DIAGNOSTICS_ARTIFACTS  = 'reports/diagnostics/**'
     }
 
     stages {
@@ -339,11 +181,7 @@ pipeline {
                         error("Unsupported deployment runtime: ${params.DEPLOY_RUNTIME}")
                     }
 
-                    if (
-                        shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) &&
-                        ['stage', 'prod'].contains(params.DEPLOY_ENV) &&
-                        !getPromoteImageTag()
-                    ) {
+                    if (shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) && ['stage', 'prod'].contains(params.DEPLOY_ENV) && !getPromoteImageTag()) {
                         error("${params.DEPLOY_ENV} deployments must promote an existing immutable image tag using PROMOTE_IMAGE_TAG.")
                     }
                 }
@@ -352,50 +190,56 @@ pipeline {
 
         stage('Install Dependencies') {
             when {
-                expression { return env.BUILD_IMAGE == 'true' && commandEnabled(params.INSTALL_COMMAND) }
+                expression { return env.BUILD_IMAGE == 'true' }
             }
             steps {
-                sh 'mkdir -p reports/junit reports/coverage reports/lint reports/dependency-scan reports/diagnostics'
-                script {
-                    runConfiguredCommand('Install dependencies', params.INSTALL_COMMAND)
-                }
+                sh '''
+                    mkdir -p reports/junit reports/coverage reports/lint reports/dependency-scan reports/diagnostics
+                    python -m venv venv
+                    . venv/bin/activate
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
+                    pip install pip-audit
+                '''
             }
         }
 
         stage('Lint') {
             when {
-                expression { return env.BUILD_IMAGE == 'true' && commandEnabled(params.LINT_COMMAND) }
+                expression { return env.BUILD_IMAGE == 'true' }
             }
             steps {
-                echo 'Running configured lint checks...'
-                sh 'mkdir -p reports/lint'
-                script {
-                    runConfiguredCommand('Lint', params.LINT_COMMAND)
-                }
+                echo 'Running flake8 lint checks...'
+                sh '''
+                    . venv/bin/activate
+                    flake8 app tests --statistics --tee --output-file reports/lint/flake8.log
+                '''
             }
             post {
                 always {
-                    script {
-                        archiveConfiguredArtifacts(params.LINT_ARTIFACTS)
-                    }
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/lint/**'
                 }
             }
         }
 
         stage('Dependency Scan') {
             when {
-                expression { return env.BUILD_IMAGE == 'true' && commandEnabled(params.DEPENDENCY_SCAN_COMMAND) }
+                expression { return env.BUILD_IMAGE == 'true' }
             }
             steps {
-                echo 'Running configured dependency scan...'
+                echo 'Running pip-audit dependency scan...'
                 script {
                     def scanStatus = sh(
-                        script: withReportSetup(params.DEPENDENCY_SCAN_COMMAND, 'reports/dependency-scan'),
+                        script: '''
+                            . venv/bin/activate
+                            mkdir -p reports/dependency-scan
+                            pip-audit -r requirements.txt --format json --output reports/dependency-scan/pip-audit.json
+                        ''',
                         returnStatus: true
                     )
 
                     if (scanStatus != 0 && params.ENFORCE_DEPENDENCY_SCAN) {
-                        error('Dependency scan failed. See configured dependency scan artifacts.')
+                        error('Dependency scan failed. See reports/dependency-scan/pip-audit.json.')
                     }
 
                     if (scanStatus != 0) {
@@ -405,30 +249,32 @@ pipeline {
             }
             post {
                 always {
-                    script {
-                        archiveConfiguredArtifacts(params.DEPENDENCY_SCAN_ARTIFACTS)
-                    }
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/dependency-scan/**'
                 }
             }
         }
 
         stage('Run Unit and API Tests') {
             when {
-                expression { return env.BUILD_IMAGE == 'true' && commandEnabled(params.TEST_COMMAND) }
+                expression { return env.BUILD_IMAGE == 'true' }
             }
             steps {
-                echo 'Running configured unit/API tests...'
-                sh 'mkdir -p reports/junit reports/coverage/html'
-                script {
-                    runConfiguredCommand('Unit/API tests', params.TEST_COMMAND)
-                }
+                echo "Running unit and in-process API tests (coverage >= ${COVERAGE_MIN}%)..."
+                sh '''
+                    . venv/bin/activate
+                    mkdir -p reports/junit reports/coverage/html
+                    python -m pytest tests/test_unit.py tests/test_api.py \
+                      --junitxml=reports/junit/unit-api-tests.xml \
+                      --cov=app \
+                      --cov-report=xml:reports/coverage/coverage.xml \
+                      --cov-report=html:reports/coverage/html \
+                      --cov-fail-under="${COVERAGE_MIN}"
+                '''
             }
             post {
                 always {
-                    script {
-                        publishConfiguredJUnit(params.JUNIT_REPORTS)
-                        archiveConfiguredArtifacts(params.COVERAGE_ARTIFACTS)
-                    }
+                    junit allowEmptyResults: true, testResults: 'reports/junit/*.xml'
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/coverage/**'
                 }
             }
         }
@@ -472,8 +318,7 @@ pipeline {
                           --label "ci.jenkins.build_url=${BUILD_URL}" \
                           -t "$IMAGE_REPO:${IMAGE_TAG}" \
                           -t "$IMAGE_REPO:${MOVING_IMAGE_TAG}" \
-                          -f "$DOCKERFILE_PATH" \
-                          "$DOCKER_BUILD_CONTEXT"
+                          .
                     '''
                 }
             }
@@ -532,9 +377,7 @@ pipeline {
             }
             post {
                 always {
-                    script {
-                        archiveConfiguredArtifacts(params.IMAGE_SCAN_ARTIFACTS)
-                    }
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/image-scan/**'
                 }
             }
         }
@@ -585,18 +428,14 @@ pipeline {
                             returnStdout: true
                         ).trim()
 
-                        def network = (params.DOCKER_NETWORK ?: '').trim()
-                        if (!network) {
-                            network = sh(
-                                script: '''
-                                    docker inspect "$JENKINS_CONTAINER_NAME" \
-                                      --format='{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' 2>/dev/null \
-                                    | head -n1 \
-                                    || true
-                                ''',
-                                returnStdout: true
-                            ).trim()
-                        }
+                        def network = sh(
+                            script: '''
+                                docker inspect "$JENKINS_CONTAINER_NAME" --format='{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' 2>/dev/null \
+                                | head -n1 \
+                                || true
+                            ''',
+                            returnStdout: true
+                        ).trim()
 
                         if (!network) {
                             error("Unable to detect Docker network for ${env.JENKINS_CONTAINER_NAME}.")
@@ -619,10 +458,7 @@ pipeline {
 
         stage('Manual Approval') {
             when {
-                expression {
-                    return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) &&
-                        requiresManualApproval(params.DEPLOY_ENV, params.SKIP_APPROVAL)
-                }
+                expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) && requiresManualApproval(params.DEPLOY_ENV, params.SKIP_APPROVAL) }
             }
             steps {
                 script {
@@ -649,7 +485,7 @@ pipeline {
                     } catch (err) {
                         echo "Deployment failed: ${err}"
                         captureDeploymentDiagnostics('deploy')
-                        def rolledBack = rollback(validate: params.HEALTH_CHECK_ENABLED)
+                        def rolledBack = rollback(validate: true)
                         if (rolledBack) {
                             error('Deployment failed. Rolled back to previous version.')
                         } else {
@@ -662,7 +498,7 @@ pipeline {
 
         stage('Health Check') {
             when {
-                expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) && params.HEALTH_CHECK_ENABLED }
+                expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) }
             }
             steps {
                 script {
@@ -702,39 +538,30 @@ pipeline {
 
         stage('Functional Tests') {
             when {
-                expression {
-                    return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) &&
-                        commandEnabled(params.FUNCTIONAL_TEST_COMMAND)
-                }
+                expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) }
             }
             steps {
                 script {
                     try {
-                        if (commandEnabled(params.FUNCTIONAL_TEST_REPO_URL)) {
-                            dir('functional-tests') {
-                                deleteDir()
-                                checkout([
-                                    $class: 'GitSCM',
-                                    branches: [[name: "*/${params.FUNCTIONAL_TEST_BRANCH}"]],
-                                    userRemoteConfigs: [[
-                                        url: params.FUNCTIONAL_TEST_REPO_URL,
-                                        credentialsId: params.GIT_CRED_ID
-                                    ]]
-                                ])
+                        dir('functional-tests') {
+                            deleteDir()
+                            checkout([
+                                $class: 'GitSCM',
+                                branches: [[name: "*/${params.FUNCTIONAL_TEST_BRANCH}"]],
+                                userRemoteConfigs: [[
+                                    url: params.FUNCTIONAL_TEST_REPO_URL,
+                                    credentialsId: params.GIT_CRED_ID
+                                ]]
+                            ])
 
-                                withEnv(["BASE_URL=${env.APP_BASE_URL}"]) {
-                                    runConfiguredCommand('Functional tests', params.FUNCTIONAL_TEST_COMMAND)
-                                }
-                            }
-                        } else {
                             withEnv(["BASE_URL=${env.APP_BASE_URL}"]) {
-                                runConfiguredCommand('Functional tests', params.FUNCTIONAL_TEST_COMMAND)
+                                sh 'mvn -B test'
                             }
                         }
                     } catch (err) {
                         echo "Functional tests failed: ${err}"
                         captureDeploymentDiagnostics('functional-tests')
-                        def rolledBack = rollback(validate: params.HEALTH_CHECK_ENABLED)
+                        def rolledBack = rollback(validate: true)
                         if (rolledBack) {
                             error('Functional tests failed after deployment. Rolled back to previous version.')
                         } else {
@@ -745,16 +572,16 @@ pipeline {
             }
             post {
                 always {
+                    junit allowEmptyResults: true, testResults: 'functional-tests/target/surefire-reports/*.xml'
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'functional-tests/target/surefire-reports/**'
                     script {
-                        publishConfiguredJUnit(params.FUNCTIONAL_TEST_JUNIT_REPORTS)
-                        archiveConfiguredArtifacts(params.FUNCTIONAL_TEST_ARTIFACTS)
-                        if (commandEnabled(params.ALLURE_RESULTS_PATH) && fileExists(params.ALLURE_RESULTS_PATH.trim())) {
+                        if (fileExists('functional-tests/target/allure-results')) {
                             allure([
                                 includeProperties: false,
                                 jdk: '',
                                 properties: [],
                                 reportBuildPolicy: 'ALWAYS',
-                                results: [[path: params.ALLURE_RESULTS_PATH.trim()]]
+                                results: [[path: 'functional-tests/target/allure-results']]
                             ])
                         } else {
                             echo 'No functional test Allure results found to publish.'
@@ -766,7 +593,7 @@ pipeline {
 
         stage('Stability Check') {
             when {
-                expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) && params.HEALTH_CHECK_ENABLED }
+                expression { return shouldDeploy(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) }
             }
             steps {
                 script {
@@ -778,8 +605,7 @@ pipeline {
                             for i in \$(seq 1 ${env.STABILITY_CHECKS}); do
                                 status=\$(curl -s -o /dev/null -w '%{http_code}' '${env.HEALTH_URL}' || true)
                                 if [ "\$status" != "200" ]; then
-                                    echo "Stability check \$i failed with HTTP \$status" \
-                                      | tee -a reports/diagnostics/stability-check/stability-check.log
+                                    echo "Stability check \$i failed with HTTP \$status" | tee -a reports/diagnostics/stability-check/stability-check.log
                                     curl -sv '${env.HEALTH_URL}' > reports/diagnostics/stability-check/health-response.txt 2>&1 || true
                                     exit 1
                                 fi
@@ -870,38 +696,20 @@ pipeline {
 
 def configureDeploymentEnvironment() {
     def ports = [
-        dev  : (params.DEV_HOST_PORT ?: '').trim(),
-        test : (params.TEST_HOST_PORT ?: '').trim(),
-        stage: (params.STAGE_HOST_PORT ?: '').trim(),
-        prod : (params.PROD_HOST_PORT ?: '').trim()
+        dev  : '8081',
+        test : '8082',
+        stage: '8083',
+        prod : '8084'
     ]
     def target = params.DEPLOY_ENV ?: 'dev'
     def hostPort = ports[target]
 
     if (!hostPort) {
-        error("Host port is required for deployment environment: ${target}")
+        error("Unsupported deployment environment: ${target}")
     }
 
-    def appName = (params.APP_NAME ?: '').trim()
-    def imageName = (params.IMAGE_NAME ?: '').trim() ?: appName
-    if (!imageName) {
-        error('IMAGE_NAME or APP_NAME is required.')
-    }
-
-    def baseContainerName = (params.BASE_CONTAINER_NAME ?: '').trim() ?: "${imageName}-container"
-
-    env.APP_NAME = appName ?: imageName
-    env.IMAGE_NAME = imageName
-    env.BASE_CONTAINER_NAME = baseContainerName
-    env.CONTAINER_NAME = "${baseContainerName}-${target}"
-    env.APP_PORT = requireParam('APP_PORT', params.APP_PORT)
-    env.HEALTH_PATH = normalizePath(params.HEALTH_PATH ?: '/')
-    env.DOCKER_REGISTRY = requireParam('DOCKER_REGISTRY', params.DOCKER_REGISTRY)
-    env.DOCKER_BUILD_CONTEXT = requireParam('DOCKER_BUILD_CONTEXT', params.DOCKER_BUILD_CONTEXT)
-    env.DOCKERFILE_PATH = requireParam('DOCKERFILE_PATH', params.DOCKERFILE_PATH)
-    env.JENKINS_CONTAINER_NAME = requireParam('JENKINS_CONTAINER_NAME', params.JENKINS_CONTAINER_NAME)
+    env.CONTAINER_NAME = "${env.BASE_CONTAINER_NAME}-${target}"
     env.HOST_PORT = hostPort
-
     if (isRemoteDeploy()) {
         def remoteHost = (params.REMOTE_DOCKER_HOST ?: '').trim()
         if (!remoteHost) {
@@ -912,93 +720,6 @@ def configureDeploymentEnvironment() {
         env.APP_BASE_URL = "http://${env.CONTAINER_NAME}:${env.APP_PORT}"
     }
     env.HEALTH_URL = "${env.APP_BASE_URL}${env.HEALTH_PATH}"
-}
-
-def commandEnabled(Object value) {
-    return value != null && value.toString().trim().length() > 0
-}
-
-def runConfiguredCommand(String label, Object command) {
-    def scriptText = command?.toString()?.trim()
-    if (!scriptText) {
-        echo "Skipping ${label}; no command configured."
-        return
-    }
-
-    sh script: scriptText
-}
-
-def withReportSetup(Object command, String reportDir) {
-    return """
-        mkdir -p '${reportDir}'
-        ${command?.toString()?.trim() ?: 'true'}
-    """
-}
-
-def publishConfiguredJUnit(Object patterns) {
-    def normalized = patterns?.toString()?.trim()
-    if (normalized) {
-        junit allowEmptyResults: true, testResults: normalized
-    } else {
-        echo 'No JUnit report pattern configured.'
-    }
-}
-
-def archiveConfiguredArtifacts(Object patterns) {
-    def normalized = patterns?.toString()?.trim()
-    if (normalized) {
-        archiveArtifacts allowEmptyArchive: true, artifacts: normalized
-    } else {
-        echo 'No artifact pattern configured.'
-    }
-}
-
-def joinPatterns(Object... patterns) {
-    return patterns
-        .collect { it?.toString()?.trim() }
-        .findAll { it }
-        .join(', ')
-}
-
-def dockerRunArgs() {
-    return normalizeLines(params.DOCKER_RUN_ARGS).join(' ')
-}
-
-def dockerEnvArgs() {
-    return normalizeLines(params.DOCKER_ENV_VARS)
-        .collect { "-e ${shellQuote(expandEnvPlaceholders(it))}" }
-        .join(' ')
-}
-
-def normalizeLines(Object value) {
-    return (value ?: '')
-        .toString()
-        .split(/\r?\n/)
-        .collect { it.trim() }
-        .findAll { it && !it.startsWith('#') }
-}
-
-def expandEnvPlaceholders(String value) {
-    return value.replaceAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/) { full, name ->
-        return env[name] ?: full
-    }
-}
-
-def shellQuote(String value) {
-    return "'${value.replace("'", "'\"'\"'")}'"
-}
-
-def requireParam(String name, Object value) {
-    def normalized = value?.toString()?.trim()
-    if (!normalized) {
-        error("${name} is required.")
-    }
-    return normalized
-}
-
-def normalizePath(String value) {
-    def normalized = (value ?: '/').trim()
-    return normalized.startsWith('/') ? normalized : "/${normalized}"
 }
 
 def isRemoteDeploy() {
@@ -1025,67 +746,67 @@ def withRemoteDockerVm(Closure body) {
 }
 
 def deployLocalContainer() {
-    def runArgs = dockerRunArgs()
-    def envArgs = dockerEnvArgs()
-
     withCredentials([usernamePassword(
         credentialsId: params.DOCKER_CRED_ID,
         usernameVariable: 'DOCKER_USER',
         passwordVariable: 'DOCKER_PASS'
     )]) {
-        sh """
-            IMAGE_REPO="\$DOCKER_REGISTRY/\$DOCKER_USER/\$IMAGE_NAME"
-            docker rm -f "\$CONTAINER_NAME" >/dev/null 2>&1 || true
-            docker pull "\$IMAGE_REPO:\$IMAGE_TAG"
+        sh '''
+            IMAGE_REPO="$DOCKER_REGISTRY/$DOCKER_USER/$IMAGE_NAME"
+            docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+            docker pull "$IMAGE_REPO:${IMAGE_TAG}"
             docker run -d \
-              --network "\$DOCKER_NETWORK" \
-              ${runArgs} \
-              ${envArgs} \
-              -p "\$HOST_PORT:\$APP_PORT" \
-              --name "\$CONTAINER_NAME" \
-              "\$IMAGE_REPO:\$IMAGE_TAG"
-        """
+              --network "$DOCKER_NETWORK" \
+              --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+              --cap-drop ALL \
+              --security-opt no-new-privileges \
+              -e "APP_VERSION=${IMAGE_TAG}" \
+              -p "${HOST_PORT}:${APP_PORT}" \
+              --name "$CONTAINER_NAME" \
+              "$IMAGE_REPO:${IMAGE_TAG}"
+        '''
     }
 }
 
 def deployRemoteContainer() {
-    def runArgs = dockerRunArgs()
-    def envArgs = dockerEnvArgs()
-
     withCredentials([usernamePassword(
         credentialsId: params.DOCKER_CRED_ID,
         usernameVariable: 'DOCKER_USER',
         passwordVariable: 'DOCKER_PASS'
     )]) {
         withRemoteDockerVm {
-            sh """
-                IMAGE_REPO="\$DOCKER_REGISTRY/\$DOCKER_USER/\$IMAGE_NAME"
-                REMOTE_TARGET="\$REMOTE_SSH_USER@\$REMOTE_DOCKER_HOST"
+            sh '''
+                IMAGE_REPO="$DOCKER_REGISTRY/$DOCKER_USER/$IMAGE_NAME"
+                REMOTE_TARGET="$REMOTE_SSH_USER@$REMOTE_DOCKER_HOST"
                 remote_ssh() {
-                    ssh -i "\$REMOTE_SSH_KEY" \
-                      -p "\$REMOTE_DOCKER_SSH_PORT" \
+                    ssh -i "$REMOTE_SSH_KEY" \
+                      -p "$REMOTE_DOCKER_SSH_PORT" \
                       -o BatchMode=yes \
                       -o StrictHostKeyChecking=no \
-                      "\$REMOTE_TARGET" "\$@"
+                      "$REMOTE_TARGET" "$@"
                 }
 
-                printf '%s' "\$DOCKER_PASS" | remote_ssh \
-                  "docker login '\$DOCKER_REGISTRY' -u '\$DOCKER_USER' --password-stdin"
+                printf '%s' "$DOCKER_PASS" | remote_ssh \
+                  "docker login '$DOCKER_REGISTRY' -u '$DOCKER_USER' --password-stdin"
 
                 remote_ssh "
                     set -eu
-                    docker rm -f '\$CONTAINER_NAME' >/dev/null 2>&1 || true
-                    docker pull '\$IMAGE_REPO:\$IMAGE_TAG'
+                    docker rm -f '$CONTAINER_NAME' >/dev/null 2>&1 || true
+                    docker pull '$IMAGE_REPO:$IMAGE_TAG'
                     docker run -d \
-                      ${runArgs} \
-                      ${envArgs} \
-                      -p '\$HOST_PORT:\$APP_PORT' \
-                      --name '\$CONTAINER_NAME' \
-                      '\$IMAGE_REPO:\$IMAGE_TAG'
+                      --read-only \
+                      --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+                      --cap-drop ALL \
+                      --security-opt no-new-privileges \
+                      -e 'APP_VERSION=$IMAGE_TAG' \
+                      -p '$HOST_PORT:$APP_PORT' \
+                      --name '$CONTAINER_NAME' \
+                      '$IMAGE_REPO:$IMAGE_TAG'
                 "
 
-                remote_ssh "docker logout '\$DOCKER_REGISTRY' || true"
-            """
+                remote_ssh "docker logout '$DOCKER_REGISTRY' || true"
+            '''
         }
     }
 }
@@ -1166,11 +887,9 @@ def captureDeploymentDiagnostics(String reason) {
                       "\$REMOTE_TARGET" "\$@"
                 }
 
-                remote_ssh "docker ps -a --filter name='${env.CONTAINER_NAME}'" \
-                  > 'reports/diagnostics/${safeReason}/docker-ps.txt' 2>&1 || true
+                remote_ssh "docker ps -a --filter name='${env.CONTAINER_NAME}'" > 'reports/diagnostics/${safeReason}/docker-ps.txt' 2>&1 || true
                 remote_ssh "docker inspect '${env.CONTAINER_NAME}'" > 'reports/diagnostics/${safeReason}/docker-inspect.json' 2>&1 || true
-                remote_ssh "docker logs --timestamps '${env.CONTAINER_NAME}'" \
-                  > 'reports/diagnostics/${safeReason}/container.log' 2>&1 || true
+                remote_ssh "docker logs --timestamps '${env.CONTAINER_NAME}'" > 'reports/diagnostics/${safeReason}/container.log' 2>&1 || true
                 curl -sv '${env.HEALTH_URL}' > 'reports/diagnostics/${safeReason}/health-response.txt' 2>&1 || true
             """
         }
@@ -1197,19 +916,8 @@ def captureDeploymentDiagnostics(String reason) {
 }
 
 def publishPipelineArtifacts() {
-    publishConfiguredJUnit(joinPatterns(
-        params.JUNIT_REPORTS,
-        params.FUNCTIONAL_TEST_JUNIT_REPORTS
-    ))
-    archiveConfiguredArtifacts(joinPatterns(
-        params.LINT_ARTIFACTS,
-        params.DEPENDENCY_SCAN_ARTIFACTS,
-        params.COVERAGE_ARTIFACTS,
-        params.IMAGE_SCAN_ARTIFACTS,
-        env.DIAGNOSTICS_ARTIFACTS,
-        params.FUNCTIONAL_TEST_ARTIFACTS,
-        commandEnabled(params.ALLURE_RESULTS_PATH) ? "${params.ALLURE_RESULTS_PATH.trim()}/**" : ''
-    ))
+    junit allowEmptyResults: true, testResults: 'reports/junit/*.xml, functional-tests/target/surefire-reports/*.xml'
+    archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/lint/**, reports/dependency-scan/**, reports/coverage/**, reports/image-scan/**, reports/diagnostics/**, functional-tests/target/surefire-reports/**, functional-tests/target/allure-results/**'
 }
 
 /**
@@ -1220,12 +928,10 @@ def rollback(Map args = [:]) {
     boolean validate = args.get('validate', true)
     def previous = env.PREVIOUS_IMAGE ?: PREVIOUS_IMAGE
     def network = env.DOCKER_NETWORK
-    def container = env.CONTAINER_NAME ?: "${env.BASE_CONTAINER_NAME ?: env.IMAGE_NAME}-container"
-    def hostPort = env.HOST_PORT ?: params.DEV_HOST_PORT
-    def appPort = env.APP_PORT ?: params.APP_PORT
-    def healthUrl = env.HEALTH_URL ?: "http://${container}:${appPort}${normalizePath(params.HEALTH_PATH ?: '/')}"
-    def runArgs = dockerRunArgs()
-    def envArgs = dockerEnvArgs()
+    def container = env.CONTAINER_NAME ?: 'my-app-container'
+    def hostPort = env.HOST_PORT ?: '8081'
+    def appPort = env.APP_PORT ?: '8081'
+    def healthUrl = env.HEALTH_URL ?: "http://${container}:${appPort}/health"
 
     if (!previous || previous == 'none') {
         echo 'No previous image found. Cannot rollback.'
@@ -1245,8 +951,10 @@ def rollback(Map args = [:]) {
                     set -eu
                     docker rm -f '${container}' || true
                     docker run -d \
-                      ${runArgs} \
-                      ${envArgs} \
+                      --read-only \
+                      --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+                      --cap-drop ALL \
+                      --security-opt no-new-privileges \
                       -p '${hostPort}:${appPort}' \
                       --name '${container}' \
                       '${previous}'
@@ -1264,8 +972,10 @@ def rollback(Map args = [:]) {
             docker rm -f '${container}' || true
             docker run -d \
               --network '${network}' \
-              ${runArgs} \
-              ${envArgs} \
+              --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+              --cap-drop ALL \
+              --security-opt no-new-privileges \
               -p '${hostPort}:${appPort}' \
               --name '${container}' \
               '${previous}'

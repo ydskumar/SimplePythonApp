@@ -34,6 +34,66 @@ pipeline {
             defaultValue: 'DockerHubCred',
             description: 'Jenkins credentials ID for Docker Hub login'
         )
+        string(
+            name: 'IMAGE_NAME',
+            defaultValue: 'mysimplepython-app',
+            description: 'Docker image name'
+        )
+        string(
+            name: 'BASE_CONTAINER_NAME',
+            defaultValue: 'mysimplepython-app-container',
+            description: 'Base container name used with the selected deployment environment'
+        )
+        string(
+            name: 'JENKINS_CONTAINER_NAME',
+            defaultValue: 'jenkins',
+            description: 'Jenkins controller container name used to detect the Docker network'
+        )
+        string(
+            name: 'HEALTH_PATH',
+            defaultValue: '/health',
+            description: 'Application health endpoint path'
+        )
+        string(
+            name: 'REQUIREMENTS_FILE',
+            defaultValue: 'requirements.txt',
+            description: 'Python requirements file used for dependency install and audit'
+        )
+        string(
+            name: 'LINT_PATHS',
+            defaultValue: 'app tests',
+            description: 'Space-separated paths passed to flake8'
+        )
+        string(
+            name: 'UNIT_TEST_PATHS',
+            defaultValue: 'tests/test_unit.py tests/test_api.py',
+            description: 'Space-separated pytest test paths'
+        )
+        string(
+            name: 'COVERAGE_PACKAGE',
+            defaultValue: 'app',
+            description: 'Python package or path used for coverage measurement'
+        )
+        string(
+            name: 'FUNCTIONAL_TEST_WORKDIR',
+            defaultValue: 'functional-tests',
+            description: 'Workspace directory used to checkout and run functional tests'
+        )
+        string(
+            name: 'FUNCTIONAL_TEST_JUNIT_GLOB',
+            defaultValue: 'functional-tests/target/surefire-reports/*.xml',
+            description: 'JUnit report glob for functional tests'
+        )
+        string(
+            name: 'FUNCTIONAL_TEST_ARTIFACTS',
+            defaultValue: 'functional-tests/target/surefire-reports/**',
+            description: 'Artifact glob for functional test reports'
+        )
+        string(
+            name: 'FUNCTIONAL_TEST_ALLURE_RESULTS',
+            defaultValue: 'functional-tests/target/allure-results',
+            description: 'Allure results path for functional tests'
+        )
         booleanParam(
             name: 'SKIP_APPROVAL',
             defaultValue: false,
@@ -100,11 +160,6 @@ pipeline {
 
     environment {
         // Docker / deploy
-        IMAGE_NAME             = 'mysimplepython-app'
-        BASE_CONTAINER_NAME    = 'mysimplepython-app-container'
-        JENKINS_CONTAINER_NAME = 'jenkins'
-        APP_PORT               = '8081'
-        HEALTH_PATH            = '/health'
         DOCKER_REGISTRY        = 'docker.io'
 
         // Quality / timing gates
@@ -198,7 +253,7 @@ pipeline {
                     python -m venv venv
                     . venv/bin/activate
                     pip install --upgrade pip
-                    pip install -r requirements.txt
+                    pip install -r "$REQUIREMENTS_FILE"
                     pip install pip-audit
                 '''
             }
@@ -212,7 +267,7 @@ pipeline {
                 echo 'Running flake8 lint checks...'
                 sh '''
                     . venv/bin/activate
-                    flake8 app tests --statistics --tee --output-file reports/lint/flake8.log
+                    flake8 $LINT_PATHS --statistics --tee --output-file reports/lint/flake8.log
                 '''
             }
             post {
@@ -233,7 +288,7 @@ pipeline {
                         script: '''
                             . venv/bin/activate
                             mkdir -p reports/dependency-scan
-                            pip-audit -r requirements.txt --format json --output reports/dependency-scan/pip-audit.json
+                            pip-audit -r "$REQUIREMENTS_FILE" --format json --output reports/dependency-scan/pip-audit.json
                         ''',
                         returnStatus: true
                     )
@@ -263,9 +318,9 @@ pipeline {
                 sh '''
                     . venv/bin/activate
                     mkdir -p reports/junit reports/coverage/html
-                    python -m pytest tests/test_unit.py tests/test_api.py \
+                    python -m pytest $UNIT_TEST_PATHS \
                       --junitxml=reports/junit/unit-api-tests.xml \
-                      --cov=app \
+                      --cov="$COVERAGE_PACKAGE" \
                       --cov-report=xml:reports/coverage/coverage.xml \
                       --cov-report=html:reports/coverage/html \
                       --cov-fail-under="${COVERAGE_MIN}"
@@ -296,7 +351,7 @@ pipeline {
                 expression { return env.BUILD_IMAGE == 'true' }
             }
             steps {
-                echo "Building ${env.IMAGE_NAME}:${env.IMAGE_TAG}..."
+                echo "Building ${params.IMAGE_NAME}:${env.IMAGE_TAG}..."
                 withCredentials([usernamePassword(
                     credentialsId: params.DOCKER_CRED_ID,
                     usernameVariable: 'DOCKER_USER',
@@ -387,7 +442,7 @@ pipeline {
                 expression { return env.BUILD_IMAGE == 'true' && isTrustedBranch(params.GIT_BRANCH, params.TRUSTED_DEPLOY_BRANCHES) }
             }
             steps {
-                echo "Pushing ${env.IMAGE_NAME}:${env.IMAGE_TAG} and ${env.MOVING_IMAGE_TAG}..."
+                echo "Pushing ${params.IMAGE_NAME}:${env.IMAGE_TAG} and ${env.MOVING_IMAGE_TAG}..."
                 withCredentials([usernamePassword(
                     credentialsId: params.DOCKER_CRED_ID,
                     usernameVariable: 'DOCKER_USER',
@@ -438,7 +493,7 @@ pipeline {
                         ).trim()
 
                         if (!network) {
-                            error("Unable to detect Docker network for ${env.JENKINS_CONTAINER_NAME}.")
+                            error("Unable to detect Docker network for ${params.JENKINS_CONTAINER_NAME}.")
                         }
 
                         env.DOCKER_NETWORK = network
@@ -463,7 +518,7 @@ pipeline {
             steps {
                 script {
                     timeout(time: env.APPROVAL_TIMEOUT_HOURS.toInteger(), unit: 'HOURS') {
-                        input message: "Approve deployment of ${env.IMAGE_NAME}:${env.IMAGE_TAG} to ${params.DEPLOY_ENV}?", ok: 'Deploy'
+                        input message: "Approve deployment of ${params.IMAGE_NAME}:${env.IMAGE_TAG} to ${params.DEPLOY_ENV}?", ok: 'Deploy'
                     }
                 }
             }
@@ -543,7 +598,7 @@ pipeline {
             steps {
                 script {
                     try {
-                        dir('functional-tests') {
+                        dir(params.FUNCTIONAL_TEST_WORKDIR) {
                             deleteDir()
                             checkout([
                                 $class: 'GitSCM',
@@ -560,7 +615,7 @@ pipeline {
                         }
                     } catch (err) {
                         echo "Functional tests failed: ${err}"
-                        captureDeploymentDiagnostics('functional-tests')
+                        captureDeploymentDiagnostics(params.FUNCTIONAL_TEST_WORKDIR)
                         def rolledBack = rollback(validate: true)
                         if (rolledBack) {
                             error('Functional tests failed after deployment. Rolled back to previous version.')
@@ -572,16 +627,16 @@ pipeline {
             }
             post {
                 always {
-                    junit allowEmptyResults: true, testResults: 'functional-tests/target/surefire-reports/*.xml'
-                    archiveArtifacts allowEmptyArchive: true, artifacts: 'functional-tests/target/surefire-reports/**'
+                    junit allowEmptyResults: true, testResults: params.FUNCTIONAL_TEST_JUNIT_GLOB
+                    archiveArtifacts allowEmptyArchive: true, artifacts: params.FUNCTIONAL_TEST_ARTIFACTS
                     script {
-                        if (fileExists('functional-tests/target/allure-results')) {
+                        if (fileExists(params.FUNCTIONAL_TEST_ALLURE_RESULTS)) {
                             allure([
                                 includeProperties: false,
                                 jdk: '',
                                 properties: [],
                                 reportBuildPolicy: 'ALWAYS',
-                                results: [[path: 'functional-tests/target/allure-results']]
+                                results: [[path: params.FUNCTIONAL_TEST_ALLURE_RESULTS]]
                             ])
                         } else {
                             echo 'No functional test Allure results found to publish.'
@@ -695,20 +750,10 @@ pipeline {
 }
 
 def configureDeploymentEnvironment() {
-    def ports = [
-        dev  : '8081',
-        test : '8082',
-        stage: '8083',
-        prod : '8084'
-    ]
     def target = params.DEPLOY_ENV ?: 'dev'
-    def hostPort = ports[target]
+    def hostPort = resolveDeploymentPort(target)
 
-    if (!hostPort) {
-        error("Unsupported deployment environment: ${target}")
-    }
-
-    env.CONTAINER_NAME = "${env.BASE_CONTAINER_NAME}-${target}"
+    env.CONTAINER_NAME = "${params.BASE_CONTAINER_NAME}-${target}"
     env.HOST_PORT = hostPort
     if (isRemoteDeploy()) {
         def remoteHost = (params.REMOTE_DOCKER_HOST ?: '').trim()
@@ -717,9 +762,25 @@ def configureDeploymentEnvironment() {
         }
         env.APP_BASE_URL = "http://${remoteHost}:${env.HOST_PORT}"
     } else {
-        env.APP_BASE_URL = "http://${env.CONTAINER_NAME}:${env.APP_PORT}"
+        env.APP_BASE_URL = "http://${env.CONTAINER_NAME}:${env.HOST_PORT}"
     }
-    env.HEALTH_URL = "${env.APP_BASE_URL}${env.HEALTH_PATH}"
+    env.HEALTH_URL = "${env.APP_BASE_URL}${params.HEALTH_PATH}"
+}
+
+def resolveDeploymentPort(String target) {
+    def ports = [
+        dev  : '8081',
+        test : '8082',
+        stage: '8083',
+        prod : '8084'
+    ]
+    def port = ports[target]
+
+    if (!port) {
+        error("Unsupported deployment environment: ${target}")
+    }
+
+    return port
 }
 
 def isRemoteDeploy() {
@@ -762,7 +823,8 @@ def deployLocalContainer() {
               --cap-drop ALL \
               --security-opt no-new-privileges \
               -e "APP_VERSION=${IMAGE_TAG}" \
-              -p "${HOST_PORT}:${APP_PORT}" \
+              -e "PORT=${HOST_PORT}" \
+              -p "${HOST_PORT}:${HOST_PORT}" \
               --name "$CONTAINER_NAME" \
               "$IMAGE_REPO:${IMAGE_TAG}"
         '''
@@ -800,7 +862,8 @@ def deployRemoteContainer() {
                       --cap-drop ALL \
                       --security-opt no-new-privileges \
                       -e 'APP_VERSION=$IMAGE_TAG' \
-                      -p '$HOST_PORT:$APP_PORT' \
+                      -e 'PORT=$HOST_PORT' \
+                      -p '$HOST_PORT:$HOST_PORT' \
                       --name '$CONTAINER_NAME' \
                       '$IMAGE_REPO:$IMAGE_TAG'
                 "
@@ -916,8 +979,8 @@ def captureDeploymentDiagnostics(String reason) {
 }
 
 def publishPipelineArtifacts() {
-    junit allowEmptyResults: true, testResults: 'reports/junit/*.xml, functional-tests/target/surefire-reports/*.xml'
-    archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/lint/**, reports/dependency-scan/**, reports/coverage/**, reports/image-scan/**, reports/diagnostics/**, functional-tests/target/surefire-reports/**, functional-tests/target/allure-results/**'
+    junit allowEmptyResults: true, testResults: "reports/junit/*.xml, ${params.FUNCTIONAL_TEST_JUNIT_GLOB}"
+    archiveArtifacts allowEmptyArchive: true, artifacts: "reports/lint/**, reports/dependency-scan/**, reports/coverage/**, reports/image-scan/**, reports/diagnostics/**, ${params.FUNCTIONAL_TEST_ARTIFACTS}, ${params.FUNCTIONAL_TEST_ALLURE_RESULTS}/**"
 }
 
 /**
@@ -928,10 +991,11 @@ def rollback(Map args = [:]) {
     boolean validate = args.get('validate', true)
     def previous = env.PREVIOUS_IMAGE ?: PREVIOUS_IMAGE
     def network = env.DOCKER_NETWORK
-    def container = env.CONTAINER_NAME ?: 'my-app-container'
-    def hostPort = env.HOST_PORT ?: '8081'
-    def appPort = env.APP_PORT ?: '8081'
-    def healthUrl = env.HEALTH_URL ?: "http://${container}:${appPort}/health"
+    def target = params.DEPLOY_ENV ?: 'dev'
+    def defaultPort = resolveDeploymentPort(target)
+    def container = env.CONTAINER_NAME ?: "${params.BASE_CONTAINER_NAME}-${target}"
+    def hostPort = env.HOST_PORT ?: defaultPort
+    def healthUrl = env.HEALTH_URL ?: "http://${container}:${hostPort}${params.HEALTH_PATH}"
 
     if (!previous || previous == 'none') {
         echo 'No previous image found. Cannot rollback.'
@@ -955,7 +1019,8 @@ def rollback(Map args = [:]) {
                       --tmpfs /tmp:rw,noexec,nosuid,size=64m \
                       --cap-drop ALL \
                       --security-opt no-new-privileges \
-                      -p '${hostPort}:${appPort}' \
+                      -e 'PORT=${hostPort}' \
+                      -p '${hostPort}:${hostPort}' \
                       --name '${container}' \
                       '${previous}'
                   "
@@ -976,7 +1041,8 @@ def rollback(Map args = [:]) {
               --tmpfs /tmp:rw,noexec,nosuid,size=64m \
               --cap-drop ALL \
               --security-opt no-new-privileges \
-              -p '${hostPort}:${appPort}' \
+              -e 'PORT=${hostPort}' \
+              -p '${hostPort}:${hostPort}' \
               --name '${container}' \
               '${previous}'
         """
